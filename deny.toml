@@ -1,0 +1,29 @@
+[advisories]
+# Do not suppress advisories without a documented, reviewed exception.
+ignore = []
+
+[bans]
+# Report duplicate dependency versions without blocking initial adoption.
+multiple-versions = "warn"
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "OpenSSL",
+  "Unicode-3.0",
+  "Zlib",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
