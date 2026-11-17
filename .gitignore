@@ -1,0 +1,47 @@
+/upstream/
+build/
+target/
+dist/
+coverage/
+*.log
+*.tmp
+.env
+.env.*
+.vscode/
+.idea/
+
+# Local documentation backups
+docs/backups/
+# Build output
+cmake-build-*/
+node_modules/
+venv/
+.venv/
+__pycache__/
+.pytest_cache/
+# IDE and OS files
+.DS_Store
+# Runtime logs
+# Secrets and private keys
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+# Generated certificates and PKI
+pki/
+certs/private/
+# Local backup copies
+scripts/*.backup-*
+
+# Recursive generated output and local backup files
+**/build/
+**/target/
+**/dist/
+**/node_modules/
+**/__pycache__/
+**/.pytest_cache/
+*.bak
+/backups/

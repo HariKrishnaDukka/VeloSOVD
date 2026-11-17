@@ -1,0 +1,16 @@
+[package]
+name = "virtual-ecu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+axum.workspace = true
+serde.workspace = true
+diagnostic-common = { path = "../diagnostic-common" }
+libc = "0.2"
+
+uds-protocol = { path = "../uds-protocol" }
+vehicle-topology = { path = "../vehicle-topology" }
+doip-gateway = { path = "../doip-gateway" }

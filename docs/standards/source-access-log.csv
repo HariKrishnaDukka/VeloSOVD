@@ -1,0 +1,7 @@
+source_id,artifact,version_or_edition,classification,access_status,review_status,notes
+STD-ISO-17978-1,ISO 17978-1,2026 Edition 1,normative,catalogue_verified,not_reviewed,Full normative text not reviewed
+STD-ISO-17978-2,ISO 17978-2,2026 Edition 1,normative,catalogue_verified,not_reviewed,Full normative text not reviewed
+STD-ISO-17978-3,ISO 17978-3,2026 Edition 1,normative,catalogue_and_openapi_package_inspected,openapi_structure_reviewed,Official ISO OpenAPI package obtained and structurally inspected; full normative text not reviewed
+REF-ISO-17978-3-OPENAPI,ISO 17978-3 official OpenAPI archive,OpenAPI 3.1.0; ASAM SOVD V1.1.0,technical_reference,downloaded_and_inspected,structure_reviewed,SHA-256 4a3fb8bf99acbeb1d751a0dd349612164d5d957d44d7bb5cd7919d035e454212; normative equivalence not independently established
+REF-ASAM-OPENAPI-110RC1,Uploaded OpenAPI archive,1.1.0-rc1,informative,uploaded_and_inspected,metadata_reviewed,Template only; normative equivalence unverified
+REF-ASAM-PRESENTATION-100,Uploaded ASAM release presentation,2022-06-30,informative,uploaded_and_inspected,content_reviewed,14-page presentation; not full specification

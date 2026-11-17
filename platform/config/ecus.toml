@@ -1,0 +1,17 @@
+[[ecus]]
+id = "ECM"
+name = "Engine Control Module"
+domain = "powertrain"
+base_url = "http://127.0.0.1:9001"
+
+[[ecus]]
+id = "BCM"
+name = "Body Control Module"
+domain = "body"
+base_url = "http://127.0.0.1:9001"
+
+[[ecus]]
+id = "HVAC"
+name = "Climate Control Module"
+domain = "climate"
+base_url = "http://127.0.0.1:9001"

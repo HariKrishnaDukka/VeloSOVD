@@ -1,0 +1,7 @@
+.git
+.venv
+build
+pki/out
+**/__pycache__
+.pytest_cache
+audit.log

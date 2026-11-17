@@ -1,0 +1,78 @@
+[vehicle]
+id = "SDV-DEMO-001"
+name = "Virtual Software Defined Vehicle"
+
+[central]
+namespace = "sdv-central-ns"
+sovd_bind = "0.0.0.0"
+sovd_port = 8010
+
+[[zones]]
+id = "FRONT"
+name = "Front Zonal Controller"
+namespace = "sdv-front-ns"
+can_interface = "vcan-front"
+central_ip = "10.77.10.1"
+zonal_ip = "10.77.10.2"
+doip_port = 13400
+doip_logical_address = 4353
+
+[[zones]]
+id = "REAR"
+name = "Rear Zonal Controller"
+namespace = "sdv-rear-ns"
+can_interface = "vcan-rear"
+central_ip = "10.77.10.5"
+zonal_ip = "10.77.10.6"
+doip_port = 13400
+doip_logical_address = 4354
+
+[[ecus]]
+id = "ECM"
+name = "Engine Control Module"
+domain = "powertrain"
+zone = "FRONT"
+doip_logical_address = 4368
+can_interface = "vcan-front"
+can_request_id = 1568
+can_response_id = 1576
+
+[[ecus]]
+id = "BCM"
+name = "Body Control Module"
+domain = "body"
+zone = "REAR"
+doip_logical_address = 4385
+can_interface = "vcan-rear"
+can_request_id = 1584
+can_response_id = 1592
+
+[[ecus]]
+id = "HVAC"
+name = "Climate Control Module"
+domain = "climate"
+zone = "REAR"
+doip_logical_address = 4386
+can_interface = "vcan-rear"
+can_request_id = 1600
+can_response_id = 1608
+
+[[ecus]]
+id = "LIGHTING"
+name = "Lighting Control Module"
+domain = "body"
+zone = "FRONT"
+doip_logical_address = 4369
+can_interface = "vcan-front"
+can_request_id = 1616
+can_response_id = 1624
+
+[[ecus]]
+id = "DOOR"
+name = "Door Control Module"
+domain = "body"
+zone = "FRONT"
+doip_logical_address = 4370
+can_interface = "vcan-front"
+can_request_id = 1632
+can_response_id = 1640
