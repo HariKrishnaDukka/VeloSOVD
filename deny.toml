@@ -9,6 +9,8 @@ multiple-versions = "warn"
 [licenses]
 version = 2
 confidence-threshold = 0.8
+# Keep the allowlist forward-compatible without failing on licenses absent from this dependency graph.
+unused-allowed-license = "allow"
 allow = [
   "0BSD",
   "Apache-2.0",
