@@ -1,6 +1,6 @@
 # ADR 0002: SOVD API base-path strategy
 
-- **Status:** Proposed — decision required
+- **Status:** Accepted, implementation pending
 - **Date:** 2026-11-17
 - **Decision owner:** Project owner
 - **Scope:** Central Rust HTTP server, host proxy, Vite development proxy, frontend API client, tests and developer documentation
@@ -14,7 +14,7 @@ The current frontend calls the custom `/api` endpoints. In `sovd-studio/vite.con
 
 Therefore, a standard API path decision affects more than Axum route registration. The proxy and any frontend feature that consumes the standard API must agree on the externally visible path. At present, the frontend is dependent on the custom `/api` contract and does not consume the standard-shaped execution routes through a `/v1` proxy.
 
-This ADR is a proposal only. No option has been selected, and no route, proxy, frontend or runtime change is authorized by this document.
+The project owner has approved Option A, subject to the inventory and standards-review conditions recorded below. This ADR records an accepted architectural direction; implementation remains pending. No route, proxy, frontend or runtime change is authorized by this document yet.
 
 ## 2. Decision drivers
 
@@ -89,7 +89,31 @@ The Rust server registers aliases for both prefixes, or a controlled compatibili
 | API documentation | Document `/v1` as standard-shaped surface and `/api` as custom demonstrator surface | Document external `/v1` and internal rewrite mapping | Mark `/v1` canonical and `/sovd/v1` temporary compatibility alias |
 | Deployment | Simplest path model; no HTTP-aware rewrite dependency | Adds proxy behavior/configuration and another failure point | Temporary route duplication and eventual alias-removal work |
 
-## 5. Recommendation
+## 5. Decision
+
+**Accepted direction: Option A — serve the standard-shaped routes directly at `/v1`; retain the custom demonstrator routes under `/api`.**
+
+Acceptance is conditional on completing the `/sovd/v1` dependency inventory below and reviewing the base-path rule against the normative ISO 17978-3 text when the project owner has access to it. Acceptance does not establish that `/v1` is normatively correct; the supplied OpenAPI package is informative and is not a substitute for the normative document.
+
+### 5.1 Existing `/sovd/v1` reference inventory
+
+The following references were found in the GitHub `main` source tree at baseline commit `5b3854fa2e0d3c3c377b421fe429692a84e5cd22`:
+
+| File | Location | Context | Classification |
+|---|---|---|---|
+| `crates/sovd-server/src/main.rs` | line 807 | Constructs the production `Location` header returned by the POST execution handler | Production dependency |
+| `crates/sovd-server/src/main.rs` | lines 1062 and 1066 | Registers the POST/GET execution collection and GET/DELETE/PUT execution-item routes | Production dependency |
+| `crates/sovd-server/src/main.rs` | lines 1683–1794 | HTTP integration test requests and expected `Location` path for SOVD execution routes | Test dependency |
+| `docs/sovd_deviations.md` | lines 210–214 | Lists the implemented SOVD-facing execution paths | Documentation reference |
+| `docs/sovd_deviations.md` | line 216 onward | Explains that the prefix is a local implementation choice | Documentation reference |
+| `docs/adr/0002-api-base-path.md` | throughout | Compares current path and migration options | Architecture documentation reference |
+| `docs/engineering/API_GAP_MATRIX.md` | operation-execution rows | Records current route paths and path mismatch | Engineering documentation reference |
+
+**Dependency finding:** It is not correct to say that nothing outside tests and documentation depends on `/sovd/v1`. The Rust production server uses it in both route registration and the `Location` response header. No references were found in the inspected Vite configuration, frontend API client, or host proxy scripts. The frontend currently uses `/api` only. The production server references must be changed together with the route registrations if Option A is implemented; otherwise POST may return a stale `/sovd/v1` Location even after the routes move to `/v1`.
+
+This inventory covers the repository's tracked source, test, script and documentation files inspected at the stated baseline. Re-run a repository-wide exact-string search immediately before implementation to catch references introduced after this baseline.
+
+## 6. Recommendation
 
 **Recommend Option A: direct `/v1` routes in the Rust server, with the existing custom `/api` surface retained separately.**
 
@@ -97,7 +121,7 @@ This is the least surprising architecture for clients and tests: the server itse
 
 This recommendation is not an approval or implementation decision. The project owner must select an option before any route or proxy change is made.
 
-## 6. Migration and verification plan if Option A is selected
+## 7. Migration and verification plan
 
 1. Confirm the exact route set and avoid implying that all 94 OpenAPI operations are implemented.
 2. Change only the existing standard-shaped execution routes from `/sovd/v1` to `/v1`; retain `/api` routes.
@@ -108,15 +132,21 @@ This recommendation is not an approval or implementation decision. The project o
 7. Re-run Rust formatting, Clippy, workspace tests, frontend lint and frontend build.
 8. Update the API gap matrix only after the changed routes and contracts are reviewed. A path-prefix change alone must not promote a row to implemented.
 
-## 7. Open questions for owner decision
+## 8. Standards validation and remaining conditions
 
-- Select Option A, B or C.
-- If Option C is selected, define the compatibility period and removal criterion for `/sovd/v1`.
+Before implementation is considered complete, compare the selected `/v1` base-path rule and the relevant route templates against the normative ISO 17978-3 text when it becomes available to the project owner. Record the applicable clause/definition and any required corrections in project-authored wording. Do not infer normative requirements solely from the informative OpenAPI package. If the normative text requires a different base-path arrangement, reopen this ADR before changing routes.
+
+## 9. Remaining implementation checks
+
+- Complete a fresh exact-string search for `/sovd/v1` before implementation.
+- Confirm the normative ISO 17978-3 base-path rule when the document is available.
 - Confirm whether the frontend should remain exclusively on the custom `/api` demonstrator API for now, or whether a specific feature should begin consuming `/v1`.
-- Confirm whether the canonical path must be reachable directly on central port 8010 as well as through host port 18010 (recommended: yes).
+- Confirm that the canonical path is reachable directly on central port 8010 and through host port 18010.
 
-## 8. Decision record
+## 10. Decision record
 
-**Decision:** Pending project-owner review.
+**Decision:** Option A accepted by the project owner, subject to the dependency inventory and normative ISO 17978-3 base-path check.
 
-**Implementation status:** Not implemented. No source, route, proxy, frontend, test or runtime behavior has been changed by this ADR.
+**ADR status:** Accepted, implementation pending.
+
+**Implementation status:** Not implemented. No source, route, proxy, frontend, test or runtime behavior has been changed.
