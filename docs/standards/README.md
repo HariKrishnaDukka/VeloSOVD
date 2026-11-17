@@ -44,6 +44,17 @@ Recorded package SHA-256:
 
 `4a3fb8bf99acbeb1d751a0dd349612164d5d957d44d7bb5cd7919d035e454212`
 
+
+### Exact retained package identity (matrix baseline)
+
+- Archive/package label: `openapi-specification-1.1.0-rc1`.
+- API metadata version: ASAM SOVD V1.1.0.
+- OpenAPI format version: 3.1.0.
+- Main API definition: `sovd-api.yaml`; authentication definition: `authentication-api.yaml`.
+- SHA-256 of the supplied ZIP archive: `4a3fb8bf99acbeb1d751a1dd349612164d5d957d44d7bb5cd7919d035e454212`.
+
+The rc1 suffix identifies the supplied package snapshot and is retained separately from the API metadata version. The package is informative; the normative REST API definition is in the ISO specification. This record does not establish conformance.
+
 ## ASAM official reference
 
 - ASAM SOVD:  
