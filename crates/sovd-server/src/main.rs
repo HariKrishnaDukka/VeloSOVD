@@ -37,6 +37,7 @@ struct AppState {
     client: Client,
     topology: VehicleTopology,
     zonal_http_port: u16,
+    zonal_scheme: &'static str,
     next_execution_id: Arc<AtomicU64>,
     executions: Arc<Mutex<VecDeque<OperationExecution>>>,
     execution_manager: Arc<OnceCell<ExecutionManager>>,
@@ -420,8 +421,8 @@ fn resolve_ecu_url(state: &AppState, ecu_id: &str) -> Result<String, StatusCode>
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(format!(
-        "http://{}:{}/ecus/{}",
-        zone.zonal_ip, state.zonal_http_port, ecu.id
+        "{}://{}:{}/ecus/{}",
+        state.zonal_scheme, zone.zonal_ip, state.zonal_http_port, ecu.id
     ))
 }
 
@@ -465,14 +466,29 @@ async fn health(State(state): State<AppState>) -> Json<VehicleHealth> {
     let mut zones = Vec::with_capacity(state.topology.zones.len());
 
     for zone in &state.topology.zones {
-        let endpoint = format!("http://{}:{}/ecus", zone.zonal_ip, state.zonal_http_port);
+        let endpoint = format!(
+            "{}://{}:{}/ecus",
+            state.zonal_scheme, zone.zonal_ip, state.zonal_http_port
+        );
         let probe = state.client.get(&endpoint).send().await;
 
         let (online, detail) = match probe {
-            Ok(response) if response.status().is_success() => {
-                (true, format!("HTTP {}", response.status().as_u16()))
-            }
-            Ok(response) => (false, format!("HTTP {}", response.status().as_u16())),
+            Ok(response) if response.status().is_success() => (
+                true,
+                format!(
+                    "{} {}",
+                    state.zonal_scheme.to_ascii_uppercase(),
+                    response.status().as_u16()
+                ),
+            ),
+            Ok(response) => (
+                false,
+                format!(
+                    "{} {}",
+                    state.zonal_scheme.to_ascii_uppercase(),
+                    response.status().as_u16()
+                ),
+            ),
             Err(error) => (false, error.to_string()),
         };
 
@@ -504,7 +520,10 @@ async fn list_ecus(State(state): State<AppState>) -> Result<Json<Vec<EcuInfo>>, 
     let mut result = Vec::new();
 
     for zone in &state.topology.zones {
-        let url = format!("http://{}:{}/ecus", zone.zonal_ip, state.zonal_http_port);
+        let url = format!(
+            "{}://{}:{}/ecus",
+            state.zonal_scheme, zone.zonal_ip, state.zonal_http_port
+        );
 
         let response = state
             .client
@@ -869,6 +888,7 @@ struct ClearFaultsExecutor {
     client: Client,
     topology: VehicleTopology,
     zonal_http_port: u16,
+    zonal_scheme: &'static str,
 }
 
 impl OperationExecutor for ClearFaultsExecutor {
@@ -899,8 +919,8 @@ impl OperationExecutor for ClearFaultsExecutor {
                 .ok_or_else(|| ExecutionError::Failed("ECU zone is not configured".to_string()))?;
 
             let url = format!(
-                "http://{}:{}/ecus/{}/diagnostics/operations/clear-faults",
-                zone.zonal_ip, self.zonal_http_port, ecu.id
+                "{}://{}:{}/ecus/{}/diagnostics/operations/clear-faults",
+                self.zonal_scheme, zone.zonal_ip, self.zonal_http_port, ecu.id
             );
 
             invoke_clear_faults(&self.client, url)
@@ -948,6 +968,7 @@ async fn get_execution_manager(state: &AppState) -> Result<&ExecutionManager, St
                         client: state.client.clone(),
                         topology: state.topology.clone(),
                         zonal_http_port: state.zonal_http_port,
+                        zonal_scheme: state.zonal_scheme,
                     }),
                 )
                 .await
@@ -1287,6 +1308,42 @@ fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Build the Central-to-Zonal HTTPS client.
+///
+/// Trust is restricted to the configured CA. Central presents its
+/// client certificate when connecting to a zonal server.
+fn build_zonal_mtls_client() -> Result<Client, Box<dyn std::error::Error + Send + Sync>> {
+    let ca_path = std::env::var("SDV_TLS_CA_CERT").unwrap_or_else(|_| "pki/dev/ca.crt".to_string());
+
+    let cert_path = std::env::var("SDV_TLS_CERT")
+        .unwrap_or_else(|_| "pki/dev/central/central-client.crt".to_string());
+
+    let key_path = std::env::var("SDV_TLS_KEY")
+        .unwrap_or_else(|_| "pki/dev/central/central-client.key".to_string());
+
+    let ca_pem = std::fs::read(&ca_path)?;
+    let client_cert_pem = std::fs::read(&cert_path)?;
+    let client_key_pem = std::fs::read(&key_path)?;
+
+    let ca_certificate = reqwest::Certificate::from_pem(&ca_pem)?;
+
+    // Reqwest expects the certificate and private key in one PEM identity.
+    // Concatenate in memory; do not create another private-key file.
+    let mut identity_pem = client_cert_pem;
+    identity_pem.push(b'\n');
+    identity_pem.extend_from_slice(&client_key_pem);
+
+    let identity = reqwest::Identity::from_pem(&identity_pem)?;
+
+    Client::builder()
+        .tls_built_in_root_certs(false)
+        .add_root_certificate(ca_certificate)
+        .identity(identity)
+        .timeout(Duration::from_secs(3))
+        .build()
+        .map_err(Into::into)
+}
+
 #[tokio::main]
 async fn main() {
     let topology_path = std::env::var("SDV_TOPOLOGY")
@@ -1295,15 +1352,15 @@ async fn main() {
     let topology = VehicleTopology::load(&topology_path)
         .unwrap_or_else(|error| panic!("Topology load failed: {error}"));
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()
-        .expect("Cannot create HTTP client");
+    let client = build_zonal_mtls_client().unwrap_or_else(|error| {
+        panic!("Cannot initialize Central-to-Zonal mTLS client: {error}");
+    });
 
     let state = AppState {
         client,
         topology,
         zonal_http_port: 9001,
+        zonal_scheme: "https",
         next_execution_id: Arc::new(AtomicU64::new(1)),
         executions: Arc::new(Mutex::new(VecDeque::with_capacity(
             EXECUTION_HISTORY_CAPACITY,
@@ -1488,6 +1545,7 @@ mod payload_forwarding_integration_tests {
                 .expect("HTTP client must initialize"),
             topology,
             zonal_http_port: 9001,
+            zonal_scheme: "http",
             next_execution_id: Arc::new(AtomicU64::new(1)),
             executions: history,
             execution_manager: Arc::new(OnceCell::new()),
@@ -1582,6 +1640,7 @@ mod payload_forwarding_integration_tests {
                 .expect("HTTP client must initialize"),
             topology,
             zonal_http_port: 9001,
+            zonal_scheme: "http",
             next_execution_id: Arc::new(AtomicU64::new(1)),
             executions: Arc::new(Mutex::new(VecDeque::with_capacity(
                 EXECUTION_HISTORY_CAPACITY,
@@ -1705,6 +1764,7 @@ mod payload_forwarding_integration_tests {
                 .expect("HTTP client must initialize"),
             topology,
             zonal_http_port: mock_port,
+            zonal_scheme: "http",
             next_execution_id: Arc::new(AtomicU64::new(1)),
             executions: Arc::new(Mutex::new(VecDeque::with_capacity(
                 EXECUTION_HISTORY_CAPACITY,
@@ -1874,6 +1934,7 @@ mod payload_forwarding_integration_tests {
                 .expect("HTTP client must initialize"),
             topology,
             zonal_http_port: mock_port,
+            zonal_scheme: "http",
             next_execution_id: Arc::new(AtomicU64::new(1)),
             executions: Arc::new(Mutex::new(VecDeque::with_capacity(
                 EXECUTION_HISTORY_CAPACITY,
@@ -2080,6 +2141,7 @@ mod payload_forwarding_integration_tests {
                 .expect("HTTP client must initialize"),
             topology,
             zonal_http_port: mock_port,
+            zonal_scheme: "http",
             next_execution_id: Arc::new(AtomicU64::new(1)),
             executions: Arc::new(Mutex::new(VecDeque::with_capacity(
                 EXECUTION_HISTORY_CAPACITY,
@@ -2165,6 +2227,7 @@ mod payload_forwarding_integration_tests {
                 .expect("HTTP client must initialize"),
             topology,
             zonal_http_port: mock_port,
+            zonal_scheme: "http",
             next_execution_id: Arc::new(AtomicU64::new(1)),
             executions: Arc::new(Mutex::new(VecDeque::with_capacity(
                 EXECUTION_HISTORY_CAPACITY,
@@ -2308,6 +2371,7 @@ mod payload_forwarding_integration_tests {
                 .expect("HTTP client must initialize"),
             topology,
             zonal_http_port: mock_port,
+            zonal_scheme: "http",
             next_execution_id: Arc::new(AtomicU64::new(1)),
             executions: Arc::new(Mutex::new(VecDeque::with_capacity(
                 EXECUTION_HISTORY_CAPACITY,
@@ -2619,6 +2683,7 @@ mod clear_fault_history_tests {
                 .expect("HTTP client must initialize"),
             topology,
             zonal_http_port: mock_port,
+            zonal_scheme: "http",
             next_execution_id: Arc::new(AtomicU64::new(1)),
             executions: Arc::new(Mutex::new(VecDeque::with_capacity(
                 EXECUTION_HISTORY_CAPACITY,

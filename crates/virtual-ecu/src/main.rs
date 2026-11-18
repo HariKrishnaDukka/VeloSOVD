@@ -1,5 +1,6 @@
 mod doip;
 mod isotp;
+mod tls_config;
 mod uds_dispatcher;
 
 use std::{
@@ -8,6 +9,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
 use axum::{
@@ -570,7 +572,25 @@ async fn main() {
 
     let registry: EcuRegistry = Arc::new(RwLock::new(initial_ecus));
 
-    // Bind HTTP before starting transport threads. A bind failure should not
+    // Load mandatory zonal mTLS configuration before starting transports.
+    let zone_slug = selected_zone_config.id.to_ascii_lowercase();
+
+    let ca_path = std::env::var("SDV_TLS_CA_CERT").unwrap_or_else(|_| "pki/dev/ca.crt".to_string());
+
+    let default_cert = format!("pki/dev/zones/{zone_slug}/{zone_slug}-server.crt");
+    let default_key = format!("pki/dev/zones/{zone_slug}/{zone_slug}-server.key");
+
+    let cert_path = std::env::var("SDV_TLS_CERT").unwrap_or(default_cert);
+    let key_path = std::env::var("SDV_TLS_KEY").unwrap_or(default_key);
+
+    let tls_config = tls_config::load_server_config(&ca_path, &cert_path, &key_path)
+        .unwrap_or_else(|error| {
+            panic!("Failed to initialize mandatory zonal mTLS: {error}");
+        });
+
+    println!("[TLS] Mutual TLS configuration loaded for {selected_zone}");
+
+    // Bind before starting transport threads. A bind failure must not
     // leave detached ISO-TP threads running.
     let bind_address =
         std::env::var("SDV_HTTP_BIND").unwrap_or_else(|_| "0.0.0.0:9001".to_string());
@@ -695,23 +715,45 @@ async fn main() {
         .merge(diagnostic_router)
         .with_state(registry);
 
-    println!("[HTTP] Virtual ECU API listening at http://{bind_address}");
+    println!("[HTTPS] Virtual ECU API listening at https://{bind_address} (mTLS required)");
     println!(
         "[ISO-TP] Started {} configured ECU endpoint(s)",
         isotp_threads.len()
     );
 
+    let tls_handle = axum_server::Handle::new();
+
+    let shutdown_tls_handle = tls_handle.clone();
     let shutdown_running = Arc::clone(&running);
     let doip_shutdown_signal = doip_shutdown_tx.clone();
 
-    let server_result = axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            let _ = tokio::signal::ctrl_c().await;
-            println!("[SYSTEM] Shutdown requested");
-            shutdown_running.store(false, Ordering::Release);
-            let _ = doip_shutdown_signal.send(true);
-        })
+    // Preserve coordinated shutdown of ISO-TP, DoIP and UDS actors.
+    let shutdown_task = tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+
+        println!("[SYSTEM] Shutdown requested");
+
+        shutdown_running.store(false, Ordering::Release);
+        let _ = doip_shutdown_signal.send(true);
+
+        shutdown_tls_handle.graceful_shutdown(Some(Duration::from_secs(10)));
+    });
+
+    // Reuse the already-bound TCP listener so bind errors are detected
+    // before the ECU transport workers start.
+    let std_listener = listener
+        .into_std()
+        .expect("Failed to convert zonal TCP listener");
+
+    let tls_server = axum_server::from_tcp_rustls(std_listener, tls_config)
+        .expect("Failed to initialize zonal HTTPS listener");
+
+    let server_result = tls_server
+        .handle(tls_handle)
+        .serve(app.into_make_service())
         .await;
+
+    shutdown_task.abort();
 
     running.store(false, Ordering::Release);
     let _ = doip_shutdown_tx.send(true);
