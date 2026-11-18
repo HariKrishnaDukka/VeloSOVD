@@ -206,7 +206,7 @@ check_isotp_multiframe() {
     receiver_rc=0
     wait "$receiver_pid" || receiver_rc=$?
     printf 'isotprecv exit=%s (124 is the expected capture timeout)\n' "$receiver_rc"
-    printf 'ISO-TP request: %s (%s bytes)\n' "$request_hex" "$(( \${#request_hex} / 2 ))"
+    printf 'ISO-TP request: %s (%s bytes)\n' "$request_hex" "$(expr length "$request_hex" / 2)"
     printf 'isotprecv response (hex): '
     cat "$rx_file"
     printf '\n'
