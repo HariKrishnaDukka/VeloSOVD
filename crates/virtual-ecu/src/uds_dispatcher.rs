@@ -91,6 +91,7 @@ pub fn spawn_uds_dispatcher(
     server: UdsServer,
     queue_capacity: usize,
 ) -> (UdsDispatcherHandle, JoinHandle<()>) {
+    let mut server = server;
     spawn_uds_dispatcher_with(ecu_id, queue_capacity, move |payload| {
         server.process_request(payload)
     })
