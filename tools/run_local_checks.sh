@@ -198,21 +198,21 @@ check_isotp_multiframe() {
     rx_log="$RUN_DIR/isotprecv.log"
     request_hex="2EF1874142434445464748"
     sudo ip netns exec "$FRONT_NS" timeout --signal=INT 3 \
-        isotprecv -s 0x628 -d 0x620 vcan-front >"$rx_file" 2>"$rx_log" &
+        isotprecv -s 0x620 -d 0x628 vcan-front >"$rx_file" 2>"$rx_log" &
     receiver_pid=$!
     sleep 0.4
-    printf '%s' "$request_hex" | xxd -r -p |
+    printf '2E F1 87 41 42 43 44 45 46 47 48\n' |
         sudo ip netns exec "$FRONT_NS" timeout 5 isotpsend -s 0x620 -d 0x628 vcan-front
     receiver_rc=0
     wait "$receiver_pid" || receiver_rc=$?
     printf 'isotprecv exit=%s (124 is the expected capture timeout)\n' "$receiver_rc"
     printf 'ISO-TP request: %s (%s bytes)\n' "$request_hex" "$(( \${#request_hex} / 2 ))"
     printf 'isotprecv response (hex): '
-    xxd -p "$rx_file" | tr -d '\n'
+    cat "$rx_file"
     printf '\n'
     cat "$rx_log" || true
     [[ -s "$rx_file" ]] || { printf 'No ISO-TP response captured\n' >&2; return 1; }
-    response_hex="$(xxd -p "$rx_file" | tr -d '\n' | tr '[:lower:]' '[:upper:]')"
+    response_hex="$(tr -d '[:space:]' <"$rx_file" | tr '[:lower:]' '[:upper:]')"
     [[ "$response_hex" == "7F2E11" ]] || {
         printf 'Expected UDS response 7F2E11, got %s\n' "$response_hex" >&2
         return 1
