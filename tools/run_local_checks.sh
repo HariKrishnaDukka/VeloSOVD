@@ -197,7 +197,7 @@ check_isotp_multiframe() {
     rx_file="$RUN_DIR/isotp-response.bin"
     rx_log="$RUN_DIR/isotprecv.log"
     request_hex="2EF1874142434445464748"
-    sudo ip netns exec "$FRONT_NS" timeout --signal=INT 3 \
+    sudo ip netns exec "$FRONT_NS" timeout 5 \
         isotprecv -s 0x620 -d 0x628 vcan-front >"$rx_file" 2>"$rx_log" &
     receiver_pid=$!
     sleep 0.4
@@ -205,7 +205,7 @@ check_isotp_multiframe() {
         sudo ip netns exec "$FRONT_NS" timeout 5 isotpsend -s 0x620 -d 0x628 vcan-front
     receiver_rc=0
     wait "$receiver_pid" || receiver_rc=$?
-    printf 'isotprecv exit=%s (124 is the expected capture timeout)\n' "$receiver_rc"
+    printf 'isotprecv exit=%s (0 means one response PDU was captured; 124 means receive timeout)\n' "$receiver_rc"
     printf 'ISO-TP request: %s (%s bytes)\n' "$request_hex" "$(expr length "$request_hex" / 2)"
     printf 'isotprecv response (hex): '
     cat "$rx_file"
@@ -343,6 +343,13 @@ run_check "REAR vcan-rear interface is UP" check_vcan_up "$REAR_NS" vcan-rear ||
 run_check "start FRONT virtual ECU service" start_service FRONT "$FRONT_NS" "$RUN_DIR/front.log" "$FRONT_PID_FILE" "SDV_ZONE=FRONT" "SDV_TOPOLOGY=$TOPOLOGY" "$VIRTUAL_ECU_BIN" || true
 run_check "start REAR virtual ECU service" start_service REAR "$REAR_NS" "$RUN_DIR/rear.log" "$REAR_PID_FILE" "SDV_ZONE=REAR" "SDV_TOPOLOGY=$TOPOLOGY" "$VIRTUAL_ECU_BIN" || true
 run_check "start central SOVD service" start_service CENTRAL "$CENTRAL_NS" "$RUN_DIR/central.log" "$CENTRAL_PID_FILE" "SDV_TOPOLOGY=$TOPOLOGY" "$CENTRAL_BIN" || true
+
+for service_log in "$RUN_DIR/front.log" "$RUN_DIR/rear.log" "$RUN_DIR/central.log"; do
+    if [[ -f "$service_log" ]]; then
+        log "Actual service output: $service_log"
+        tail -n 30 "$service_log" | tee -a "$RUN_LOG"
+    fi
+done
 
 SERVICES_READY=1
 if [[ "$FRONT_STARTED" -ne 1 || "$REAR_STARTED" -ne 1 || "$CENTRAL_STARTED" -ne 1 ]]; then SERVICES_READY=0; fi
