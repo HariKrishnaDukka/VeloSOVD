@@ -703,20 +703,38 @@ async fn fault_by_code(
 async fn delete_faults(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<StatusCode, StatusCode> {
-    let url = resolve_ecu_url(&state, &id)?;
+) -> Result<StatusCode, SovdApiError> {
+    let url = resolve_ecu_url(&state, &id).map_err(|status| SovdApiError {
+        status,
+        error: SovdGenericError {
+            error_code: "not-found".to_string(),
+            message: format!("ECU '{id}' is not configured"),
+            vendor_code: None,
+        },
+    })?;
 
     let response = state
         .client
         .delete(format!("{url}/diagnostics/faults"))
         .send()
         .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+        .map_err(|error| {
+            SovdApiError::from(ClearFaultError::Transport(error.to_string()))
+        })?;
 
     let status = response.status();
 
     if !status.is_success() {
-        return Err(StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY));
+        let status = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let error = response
+            .json::<SovdGenericError>()
+            .await
+            .unwrap_or_else(|_| SovdGenericError {
+                error_code: "uds-transport-error".to_string(),
+                message: format!("Zonal fault collection DELETE returned HTTP {}", status.as_u16()),
+                vendor_code: None,
+            });
+        return Err(SovdApiError { status, error });
     }
 
     Ok(StatusCode::NO_CONTENT)
