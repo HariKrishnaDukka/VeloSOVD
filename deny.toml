@@ -33,3 +33,5 @@ allow = [
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# Permit only the immutable Eclipse OpenSOVD source used by the isolated prototype.
+allow-git = ["https://github.com/eclipse-opensovd/opensovd-core"]
