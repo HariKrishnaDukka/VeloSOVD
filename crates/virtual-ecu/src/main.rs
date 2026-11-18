@@ -707,10 +707,6 @@ async fn main() {
             "/ecus/{id}/diagnostics/faults/{fault_code}",
             get(read_fault).delete(delete_fault),
         )
-        .route(
-            "/ecus/{id}/diagnostics/operations/clear-faults",
-            post(clear_faults),
-        )
         .merge(diagnostic_router)
         .with_state(registry);
 
@@ -1119,7 +1115,10 @@ mod dtc_shared_state_integration_tests {
         let unknown_collection =
             delete_faults(State(dispatchers.clone()), Path("UNKNOWN".to_string())).await;
 
-        assert!(matches!(unknown_collection, Err(StatusCode::NOT_FOUND)));
+        assert!(matches!(
+            unknown_collection,
+            Err(UdsApiError { status: StatusCode::NOT_FOUND, .. })
+        ));
 
         drop(dispatchers);
         actor.join().unwrap();
