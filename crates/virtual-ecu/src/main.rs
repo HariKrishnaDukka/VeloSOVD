@@ -16,7 +16,7 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
-use diagnostic_common::{DiagnosticFault, DiagnosticValue, EcuInfo, OperationResult};
+use diagnostic_common::{DiagnosticFault, DiagnosticValue, EcuInfo};
 use doip_gateway::{DiagnosticRouter, RouterError, UdsDispatchFailure, UdsRequestHandler};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, watch};
@@ -776,6 +776,17 @@ mod dtc_shared_state_integration_tests {
         Arc::new(RwLock::new(ecus))
     }
 
+    fn test_dispatcher(
+        dtcs: DtcStore,
+    ) -> (DiagnosticDispatcherRegistry, std::thread::JoinHandle<()>) {
+        let server = make_uds_server("ECM", dtcs);
+        let (dispatcher, actor) =
+            spawn_uds_dispatcher("ECM".to_string(), server, DEFAULT_UDS_QUEUE_CAPACITY);
+        let mut dispatchers = HashMap::new();
+        dispatchers.insert("ECM".to_string(), dispatcher);
+        (Arc::new(dispatchers), actor)
+    }
+
     #[tokio::test]
     async fn http_and_uds_read_the_same_dtc_store() {
         let registry = test_registry();
@@ -959,31 +970,29 @@ mod dtc_shared_state_integration_tests {
     }
 
     #[tokio::test]
-    async fn http_delete_fault_collection_clears_shared_dtc_store() {
+    async fn http_delete_fault_collection_clears_shared_dtc_store_through_uds() {
         let registry = test_registry();
 
         let dtcs = {
             let ecus = registry.read().await;
             ecus.get("ECM").unwrap().dtcs.clone()
         };
+        let (dispatchers, actor) = test_dispatcher(dtcs.clone());
 
-        let mut uds = make_uds_server("ECM", dtcs);
-
-        let response = delete_faults(State(registry.clone()), Path("ECM".to_string()))
+        let response = delete_faults(State(dispatchers.clone()), Path("ECM".to_string()))
             .await
-            .expect("Fault collection must be deleted");
+            .expect("Fault collection must be deleted through UDS");
 
         assert_eq!(response, StatusCode::NO_CONTENT);
+        assert!(dtcs.lock().unwrap().is_empty());
 
-        let http_response = read_faults(State(registry.clone()), Path("ECM".to_string()))
+        let http_response = read_faults(State(registry), Path("ECM".to_string()))
             .await
             .unwrap();
-
         assert!(http_response.0.is_empty());
 
-        let uds_response = uds.process_request(&[0x19, 0x02, 0x08]).unwrap();
-
-        assert_eq!(uds_response, vec![0x59, 0x02, 0xFF]);
+        drop(dispatchers);
+        actor.join().unwrap();
     }
 
     #[tokio::test]
@@ -1006,31 +1015,49 @@ mod dtc_shared_state_integration_tests {
 
         assert!(matches!(unknown_ecu, Err(StatusCode::NOT_FOUND)));
 
-        let unknown_collection = delete_faults(State(registry), Path("UNKNOWN".to_string())).await;
+        let dtcs = {
+            let ecus = registry.read().await;
+            ecus.get("ECM").unwrap().dtcs.clone()
+        };
+        let (dispatchers, actor) = test_dispatcher(dtcs);
+        let unknown_collection =
+            delete_faults(State(dispatchers.clone()), Path("UNKNOWN".to_string())).await;
 
         assert!(matches!(unknown_collection, Err(StatusCode::NOT_FOUND)));
+
+        drop(dispatchers);
+        actor.join().unwrap();
     }
 
     #[tokio::test]
-    async fn http_clear_is_visible_through_uds() {
+    async fn clear_endpoint_returns_raw_uds_positive_response_and_clears_shared_store() {
         let registry = test_registry();
 
         let dtcs = {
             let ecus = registry.read().await;
             ecus.get("ECM").unwrap().dtcs.clone()
         };
+        let (dispatchers, actor) = test_dispatcher(dtcs.clone());
 
-        let mut uds = make_uds_server("ECM", dtcs);
+        let clear_response = clear_faults(
+            State(dispatchers.clone()),
+            Path("ECM".to_string()),
+        )
+        .await
+        .expect("Clear endpoint must dispatch UDS service 0x14");
 
-        let clear_response = clear_faults(State(registry.clone()), Path("ECM".to_string()))
+        assert_eq!(clear_response.0.ecu_id, "ECM");
+        assert_eq!(clear_response.0.request_hex, "14FFFFFF");
+        assert_eq!(clear_response.0.response_hex.as_deref(), Some("54"));
+        assert!(dtcs.lock().unwrap().is_empty());
+
+        let http_response = read_faults(State(registry), Path("ECM".to_string()))
             .await
             .unwrap();
+        assert!(http_response.0.is_empty());
 
-        assert!(clear_response.0.success);
-
-        let uds_response = uds.process_request(&[0x19, 0x02, 0xFF]).unwrap();
-
-        assert_eq!(uds_response, vec![0x59, 0x02, 0xFF]);
+        drop(dispatchers);
+        actor.join().unwrap();
     }
 
     #[tokio::test]
