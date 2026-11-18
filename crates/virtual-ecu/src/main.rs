@@ -14,6 +14,7 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     http::StatusCode,
+    response::IntoResponse,
     routing::{get, post},
 };
 use diagnostic_common::{DiagnosticFault, DiagnosticValue, EcuInfo};
@@ -49,6 +50,73 @@ struct UdsDiagnosticResponse {
     ecu_id: String,
     request_hex: String,
     response_hex: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct GenericErrorBody {
+    error_code: String,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vendor_code: Option<String>,
+}
+
+#[derive(Debug)]
+struct UdsApiError {
+    status: StatusCode,
+    body: GenericErrorBody,
+}
+
+impl UdsApiError {
+    fn new(
+        status: StatusCode,
+        error_code: &str,
+        message: impl Into<String>,
+        vendor_code: Option<&str>,
+    ) -> Self {
+        Self {
+            status,
+            body: GenericErrorBody {
+                error_code: error_code.to_string(),
+                message: message.into(),
+                vendor_code: vendor_code.map(str::to_string),
+            },
+        }
+    }
+
+    fn from_dispatch(error: UdsDispatchError) -> Self {
+        match error {
+            UdsDispatchError::QueueFull => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "queue-full",
+                "The ECU diagnostic request queue is full",
+                Some("UDS_QUEUE_FULL"),
+            ),
+            UdsDispatchError::ActorUnavailable => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "dispatcher-unavailable",
+                "The ECU UDS dispatcher is unavailable",
+                Some("UDS_ACTOR_UNAVAILABLE"),
+            ),
+            UdsDispatchError::ResponseUnavailable => Self::new(
+                StatusCode::BAD_GATEWAY,
+                "response-unavailable",
+                "The ECU UDS response channel closed before a response was received",
+                Some("UDS_RESPONSE_UNAVAILABLE"),
+            ),
+            UdsDispatchError::ResponseTimeout => Self::new(
+                StatusCode::GATEWAY_TIMEOUT,
+                "timeout",
+                "The ECU UDS response deadline expired",
+                Some("UDS_RESPONSE_TIMEOUT"),
+            ),
+        }
+    }
+}
+
+impl IntoResponse for UdsApiError {
+    fn into_response(self) -> axum::response::Response {
+        (self.status, Json(self.body)).into_response()
+    }
 }
 
 fn decode_hex_payload(input: &str) -> Result<Vec<u8>, StatusCode> {
@@ -146,25 +214,31 @@ async fn dispatch_uds_payload(
     dispatchers: &DiagnosticDispatcherRegistry,
     ecu_id: String,
     payload: Vec<u8>,
-) -> Result<UdsDiagnosticResponse, StatusCode> {
-    let dispatcher = dispatchers
-        .get(&ecu_id)
-        .cloned()
-        .ok_or(StatusCode::NOT_FOUND)?;
+) -> Result<UdsDiagnosticResponse, UdsApiError> {
+    let dispatcher = dispatchers.get(&ecu_id).cloned().ok_or_else(|| {
+        UdsApiError::new(
+            StatusCode::NOT_FOUND,
+            "not-found",
+            format!("ECU '{ecu_id}' is not configured in this zone"),
+            None,
+        )
+    })?;
     let request_hex = encode_hex_payload(&payload);
 
     // The dispatcher uses a blocking standard channel. Keep that wait off
     // the Tokio executor so other ECU HTTP requests remain schedulable.
     let result = tokio::task::spawn_blocking(move || dispatcher.process_blocking(payload))
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|error| {
+            UdsApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal-error",
+                format!("UDS dispatcher task failed: {error}"),
+                None,
+            )
+        })?;
 
-    let response = result.map_err(|error| match error {
-        UdsDispatchError::QueueFull => StatusCode::SERVICE_UNAVAILABLE,
-        UdsDispatchError::ActorUnavailable => StatusCode::SERVICE_UNAVAILABLE,
-        UdsDispatchError::ResponseUnavailable => StatusCode::BAD_GATEWAY,
-        UdsDispatchError::ResponseTimeout => StatusCode::GATEWAY_TIMEOUT,
-    })?;
+    let response = result.map_err(UdsApiError::from_dispatch)?;
 
     Ok(UdsDiagnosticResponse {
         ecu_id,
@@ -177,10 +251,22 @@ async fn diagnostic_request(
     State(dispatchers): State<DiagnosticDispatcherRegistry>,
     Path(id): Path<String>,
     Json(request): Json<UdsDiagnosticRequest>,
-) -> Result<Json<UdsDiagnosticResponse>, StatusCode> {
-    let payload = decode_hex_payload(&request.payload_hex)?;
+) -> Result<Json<UdsDiagnosticResponse>, UdsApiError> {
+    let payload = decode_hex_payload(&request.payload_hex).map_err(|status| {
+        UdsApiError::new(
+            status,
+            "invalid-request",
+            "The UDS payload must be non-empty, even-length hexadecimal data",
+            None,
+        )
+    })?;
     if payload.len() > 4096 {
-        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+        return Err(UdsApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload-too-large",
+            "The UDS payload exceeds the configured 4096-byte limit",
+            None,
+        ));
     }
 
     dispatch_uds_payload(&dispatchers, id, payload)
@@ -274,7 +360,7 @@ async fn read_fault(
 async fn delete_faults(
     State(dispatchers): State<DiagnosticDispatcherRegistry>,
     Path(id): Path<String>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, UdsApiError> {
     let response = dispatch_uds_payload(
         &dispatchers,
         id,
@@ -284,11 +370,21 @@ async fn delete_faults(
 
     // Collection deletion is successful only for the exact UDS positive
     // response. A negative, suppressed, or malformed response is a failure.
-    if response.response_hex.as_deref() != Some("54") {
-        return Err(StatusCode::BAD_GATEWAY);
+    match response.response_hex.as_deref() {
+        Some("54") => Ok(StatusCode::NO_CONTENT),
+        None => Err(UdsApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "empty-response",
+            "The ECU suppressed the UDS clear response",
+            None,
+        )),
+        Some(_) => Err(UdsApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "unexpected-response",
+            "The ECU did not return exactly the UDS positive response 54",
+            None,
+        )),
     }
-
-    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn delete_fault(
@@ -316,7 +412,7 @@ async fn delete_fault(
 async fn clear_faults(
     State(dispatchers): State<DiagnosticDispatcherRegistry>,
     Path(id): Path<String>,
-) -> Result<Json<UdsDiagnosticResponse>, StatusCode> {
+) -> Result<Json<UdsDiagnosticResponse>, UdsApiError> {
     // Return the raw UDS response in hexadecimal form. The central SOVD
     // service is responsible for accepting exactly one byte: 0x54.
     dispatch_uds_payload(
