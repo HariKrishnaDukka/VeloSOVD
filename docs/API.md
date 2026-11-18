@@ -132,6 +132,11 @@ response contains `ecu_id`, `request_hex` and the raw UDS response in
 when `response_hex` is exactly `54`. This direct route does not create an
 entry in the central operation-execution history.
 
+Clear-fault errors use the generic error object shape with `error_code`
+(kebab-case), `message`, and optional `vendor_code`. UDS negative-response
+codes are retained in `vendor_code` (for example, `UDS_NRC_0x31`). The same
+shape is used in the SOVD execution-status `error` entries.
+
 ### `POST /api/ecus/{id}/operations/clear-faults/executions`
 
 Requests execution of the clear-fault operation for the selected ECU.
