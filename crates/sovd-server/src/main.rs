@@ -146,7 +146,10 @@ enum ClearFaultError {
     DispatcherUnavailable,
     ResponseUnavailable,
     Transport(String),
-    Upstream { status: StatusCode, error: SovdGenericError },
+    Upstream {
+        status: StatusCode,
+        error: SovdGenericError,
+    },
 }
 
 impl ClearFaultError {
@@ -298,8 +301,8 @@ async fn invoke_clear_faults(client: &Client, url: String) -> Result<(), ClearFa
     })?;
 
     if !response.status().is_success() {
-        let status = StatusCode::from_u16(response.status().as_u16())
-            .unwrap_or(StatusCode::BAD_GATEWAY);
+        let status =
+            StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         if let Ok(error) = response.json::<SovdGenericError>().await {
             return Err(ClearFaultError::Upstream { status, error });
         }
@@ -718,9 +721,7 @@ async fn delete_faults(
         .delete(format!("{url}/diagnostics/faults"))
         .send()
         .await
-        .map_err(|error| {
-            SovdApiError::from(ClearFaultError::Transport(error.to_string()))
-        })?;
+        .map_err(|error| SovdApiError::from(ClearFaultError::Transport(error.to_string())))?;
 
     let status = response.status();
 
@@ -731,7 +732,10 @@ async fn delete_faults(
             .await
             .unwrap_or_else(|_| SovdGenericError {
                 error_code: "uds-transport-error".to_string(),
-                message: format!("Zonal fault collection DELETE returned HTTP {}", status.as_u16()),
+                message: format!(
+                    "Zonal fault collection DELETE returned HTTP {}",
+                    status.as_u16()
+                ),
                 vendor_code: None,
             });
         return Err(SovdApiError { status, error });
