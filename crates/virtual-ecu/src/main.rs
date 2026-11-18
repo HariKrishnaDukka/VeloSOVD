@@ -142,17 +142,15 @@ fn build_doip_router(registry: &DoipEcuRegistry) -> Result<DiagnosticRouter, Rou
     Ok(router)
 }
 
-async fn diagnostic_request(
-    State(dispatchers): State<DiagnosticDispatcherRegistry>,
-    Path(id): Path<String>,
-    Json(request): Json<UdsDiagnosticRequest>,
-) -> Result<Json<UdsDiagnosticResponse>, StatusCode> {
-    let payload = decode_hex_payload(&request.payload_hex)?;
-    if payload.len() > 4096 {
-        return Err(StatusCode::PAYLOAD_TOO_LARGE);
-    }
-
-    let dispatcher = dispatchers.get(&id).cloned().ok_or(StatusCode::NOT_FOUND)?;
+async fn dispatch_uds_payload(
+    dispatchers: &DiagnosticDispatcherRegistry,
+    ecu_id: String,
+    payload: Vec<u8>,
+) -> Result<UdsDiagnosticResponse, StatusCode> {
+    let dispatcher = dispatchers
+        .get(&ecu_id)
+        .cloned()
+        .ok_or(StatusCode::NOT_FOUND)?;
     let request_hex = encode_hex_payload(&payload);
 
     // The dispatcher uses a blocking standard channel. Keep that wait off
@@ -168,11 +166,26 @@ async fn diagnostic_request(
         UdsDispatchError::ResponseTimeout => StatusCode::GATEWAY_TIMEOUT,
     })?;
 
-    Ok(Json(UdsDiagnosticResponse {
-        ecu_id: id,
+    Ok(UdsDiagnosticResponse {
+        ecu_id,
         request_hex,
         response_hex: response.as_deref().map(encode_hex_payload),
-    }))
+    })
+}
+
+async fn diagnostic_request(
+    State(dispatchers): State<DiagnosticDispatcherRegistry>,
+    Path(id): Path<String>,
+    Json(request): Json<UdsDiagnosticRequest>,
+) -> Result<Json<UdsDiagnosticResponse>, StatusCode> {
+    let payload = decode_hex_payload(&request.payload_hex)?;
+    if payload.len() > 4096 {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    dispatch_uds_payload(&dispatchers, id, payload)
+        .await
+        .map(Json)
 }
 
 async fn list_ecus(State(registry): State<EcuRegistry>) -> Json<Vec<EcuInfo>> {
@@ -259,18 +272,21 @@ async fn read_fault(
 }
 
 async fn delete_faults(
-    State(registry): State<EcuRegistry>,
+    State(dispatchers): State<DiagnosticDispatcherRegistry>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    let ecus = registry.read().await;
-    let ecu = ecus.get(&id).ok_or(StatusCode::NOT_FOUND)?;
+    let response = dispatch_uds_payload(
+        &dispatchers,
+        id,
+        vec![0x14, 0xFF, 0xFF, 0xFF],
+    )
+    .await?;
 
-    let mut dtcs = ecu
-        .dtcs
-        .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    dtcs.clear();
+    // Collection deletion is successful only for the exact UDS positive
+    // response. A negative, suppressed, or malformed response is a failure.
+    if response.response_hex.as_deref() != Some("54") {
+        return Err(StatusCode::BAD_GATEWAY);
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -298,23 +314,18 @@ async fn delete_fault(
 }
 
 async fn clear_faults(
-    State(registry): State<EcuRegistry>,
+    State(dispatchers): State<DiagnosticDispatcherRegistry>,
     Path(id): Path<String>,
-) -> Result<Json<OperationResult>, StatusCode> {
-    let mut ecus = registry.write().await;
-    let ecu = ecus.get_mut(&id).ok_or(StatusCode::NOT_FOUND)?;
-
-    let mut dtcs = ecu
-        .dtcs
-        .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    dtcs.clear();
-
-    Ok(Json(OperationResult {
-        operation: "clear_faults".to_string(),
-        success: true,
-        message: format!("{} fault memory cleared", id),
-    }))
+) -> Result<Json<UdsDiagnosticResponse>, StatusCode> {
+    // Return the raw UDS response in hexadecimal form. The central SOVD
+    // service is responsible for accepting exactly one byte: 0x54.
+    dispatch_uds_payload(
+        &dispatchers,
+        id,
+        vec![0x14, 0xFF, 0xFF, 0xFF],
+    )
+    .await
+    .map(Json)
 }
 
 fn make_ecu(
@@ -578,6 +589,14 @@ async fn main() {
 
     let diagnostic_router = Router::new()
         .route("/ecus/{id}/diagnostics/requests", post(diagnostic_request))
+        .route(
+            "/ecus/{id}/diagnostics/faults",
+            delete(delete_faults),
+        )
+        .route(
+            "/ecus/{id}/diagnostics/operations/clear-faults",
+            post(clear_faults),
+        )
         .with_state(diagnostic_dispatcher_registry);
 
     let app = Router::new()
@@ -586,7 +605,7 @@ async fn main() {
         .route("/ecus/{id}/data/vehicle-speed", get(vehicle_speed))
         .route(
             "/ecus/{id}/diagnostics/faults",
-            get(read_faults).delete(delete_faults),
+            get(read_faults),
         )
         .route(
             "/ecus/{id}/diagnostics/faults/{fault_code}",
