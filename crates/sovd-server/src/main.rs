@@ -113,7 +113,7 @@ struct SovdStartExecutionRequest {
     proximity_response: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 struct SovdGenericError {
     error_code: String,
     message: String,
@@ -133,7 +133,7 @@ impl IntoResponse for SovdApiError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum ClearFaultError {
     NegativeResponse(u8),
     EmptyResponse,
@@ -259,7 +259,7 @@ fn decode_uds_response_hex(input: &str) -> Result<Vec<u8>, ClearFaultError> {
     }
 
     let mut bytes = Vec::with_capacity(input.len() / 2);
-    for pair in input.as_bytes().chunks_exact(2) {
+    for pair in input.as_bytes().as_chunks::<2>().0 {
         let pair = std::str::from_utf8(pair)
             .map_err(|error| ClearFaultError::MalformedResponse(error.to_string()))?;
         let byte = u8::from_str_radix(pair, 16)
@@ -304,7 +304,13 @@ async fn invoke_clear_faults(client: &Client, url: String) -> Result<(), ClearFa
         let status =
             StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         if let Ok(error) = response.json::<SovdGenericError>().await {
-            return Err(ClearFaultError::Upstream { status, error });
+            return Err(match error.error_code.as_str() {
+                "queue-full" => ClearFaultError::QueueFull,
+                "dispatcher-unavailable" => ClearFaultError::DispatcherUnavailable,
+                "response-unavailable" => ClearFaultError::ResponseUnavailable,
+                "timeout" => ClearFaultError::Timeout,
+                _ => ClearFaultError::Upstream { status, error },
+            });
         }
         return Err(match status {
             StatusCode::GATEWAY_TIMEOUT => ClearFaultError::Timeout,
