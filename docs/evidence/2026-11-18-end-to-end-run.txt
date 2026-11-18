@@ -1,0 +1,439 @@
+Commit: 0d571ba07c0ffd3661d15f103b90e789a1506955
+Date: 2026-11-18
+Branch: test/end-to-end-local-checks
+Host: Ubuntu laptop (local run)
+
+[local-checks] Repository: /home/USER/VeloSOVD
+[local-checks] Run artifacts: /tmp/velosovd-local-checks.C9PH2R
+[PASS] Linux and required command preflight (including isotpsend/isotprecv)
+[local-checks] Running: Bash syntax for local-check harness
+[PASS] Bash syntax for local-check harness
+[local-checks] Running: Python syntax for independent DoIP client
+Python AST parse passed
+[PASS] Python syntax for independent DoIP client
+[PASS] sudo authorization
+[local-checks] Running: load Linux CAN ISO-TP kernel protocol (can-isotp)
+[PASS] load Linux CAN ISO-TP kernel protocol (can-isotp)
+[local-checks] Running: build central and virtual ECU services
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+[PASS] build central and virtual ECU services
+[PASS] create central, FRONT and REAR namespaces, veth links and vCAN interfaces
+[local-checks] Running: central-to-FRONT namespace connectivity
+PING 10.77.10.2 (10.77.10.2) 56(84) bytes of data.
+64 bytes from 10.77.10.2: icmp_seq=1 ttl=64 time=0.032 ms
+
+--- 10.77.10.2 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 0.032/0.032/0.032/0.000 ms
+[PASS] central-to-FRONT namespace connectivity
+[local-checks] Running: FRONT-to-central namespace connectivity
+PING 10.77.10.1 (10.77.10.1) 56(84) bytes of data.
+64 bytes from 10.77.10.1: icmp_seq=1 ttl=64 time=0.018 ms
+
+--- 10.77.10.1 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 0.018/0.018/0.018/0.000 ms
+[PASS] FRONT-to-central namespace connectivity
+[local-checks] Running: central-to-REAR namespace connectivity
+PING 10.77.10.6 (10.77.10.6) 56(84) bytes of data.
+64 bytes from 10.77.10.6: icmp_seq=1 ttl=64 time=0.032 ms
+
+--- 10.77.10.6 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 0.032/0.032/0.032/0.000 ms
+[PASS] central-to-REAR namespace connectivity
+[local-checks] Running: REAR-to-central namespace connectivity
+PING 10.77.10.5 (10.77.10.5) 56(84) bytes of data.
+64 bytes from 10.77.10.5: icmp_seq=1 ttl=64 time=0.018 ms
+
+--- 10.77.10.5 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 0.018/0.018/0.018/0.000 ms
+[PASS] REAR-to-central namespace connectivity
+[local-checks] Running: FRONT vcan-front interface is UP
+[PASS] FRONT vcan-front interface is UP
+[local-checks] Running: REAR vcan-rear interface is UP
+[PASS] REAR vcan-rear interface is UP
+[local-checks] Running: start FRONT virtual ECU service
+[local-checks] Starting FRONT in sdv-front-ns; log=/tmp/velosovd-local-checks.C9PH2R/front.log
+[local-checks] Starting FRONT in sdv-front-ns; log=/tmp/velosovd-local-checks.C9PH2R/front.log
+FRONT service PID=1191303 (launcher PID=1191297)
+[PASS] start FRONT virtual ECU service
+[local-checks] Running: start REAR virtual ECU service
+[local-checks] Starting REAR in sdv-rear-ns; log=/tmp/velosovd-local-checks.C9PH2R/rear.log
+[local-checks] Starting REAR in sdv-rear-ns; log=/tmp/velosovd-local-checks.C9PH2R/rear.log
+REAR service PID=1191341 (launcher PID=1191336)
+[PASS] start REAR virtual ECU service
+[local-checks] Running: start central SOVD service
+[local-checks] Starting CENTRAL in sdv-central-ns; log=/tmp/velosovd-local-checks.C9PH2R/central.log
+[local-checks] Starting CENTRAL in sdv-central-ns; log=/tmp/velosovd-local-checks.C9PH2R/central.log
+CENTRAL service PID=1191373 (launcher PID=1191369)
+[PASS] start central SOVD service
+[local-checks] Actual service output: /tmp/velosovd-local-checks.C9PH2R/front.log
+[TOPOLOGY] Loaded vehicle 'Virtual Software Defined Vehicle' (SDV-DEMO-001)
+[TOPOLOGY] Configured zones: 2, ECUs: 5
+[ZONE] Runtime zone: FRONT | ECU count: 3
+[TOPOLOGY] ECU=ECM ZONE=FRONT CAN=vcan-front RX=0x620 TX=0x628
+[TOPOLOGY] ECU=LIGHTING ZONE=FRONT CAN=vcan-front RX=0x650 TX=0x658
+[TOPOLOGY] ECU=DOOR ZONE=FRONT CAN=vcan-front RX=0x660 TX=0x668
+[ECM][ISO-TP] Listening on vcan-front: RX=0x620, TX=0x628
+[LIGHTING][ISO-TP] Listening on vcan-front: RX=0x650, TX=0x658
+[DoIP] Prepared diagnostic router for 3 ECU(s)
+[DoIP] TCP listener active at 10.77.10.2:13400 | entity logical address 0x1101
+[DOOR][ISO-TP] Listening on vcan-front: RX=0x660, TX=0x668
+[HTTP] Virtual ECU API listening at http://0.0.0.0:9001
+[ISO-TP] Started 3 configured ECU endpoint(s)
+[local-checks] Actual service output: /tmp/velosovd-local-checks.C9PH2R/rear.log
+[TOPOLOGY] Loaded vehicle 'Virtual Software Defined Vehicle' (SDV-DEMO-001)
+[TOPOLOGY] Configured zones: 2, ECUs: 5
+[ZONE] Runtime zone: REAR | ECU count: 2
+[TOPOLOGY] ECU=BCM ZONE=REAR CAN=vcan-rear RX=0x630 TX=0x638
+[TOPOLOGY] ECU=HVAC ZONE=REAR CAN=vcan-rear RX=0x640 TX=0x648
+[BCM][ISO-TP] Listening on vcan-rear: RX=0x630, TX=0x638
+[DoIP] Prepared diagnostic router for 2 ECU(s)
+[DoIP] TCP listener active at 10.77.10.6:13400 | entity logical address 0x1102
+[HVAC][ISO-TP] Listening on vcan-rear: RX=0x640, TX=0x648
+[HTTP] Virtual ECU API listening at http://0.0.0.0:9001
+[ISO-TP] Started 2 configured ECU endpoint(s)
+[local-checks] Actual service output: /tmp/velosovd-local-checks.C9PH2R/central.log
+[local-checks] Running: FRONT zonal HTTP service ready
+[{"id":"DOOR","name":"Door Control Module","domain":"body","status":"online"},{"id":"ECM","name":"Engine Control Module","domain":"powertrain","status":"online"},{"id":"LIGHTING","name":"Lighting Control Module","domain":"body","status":"online"}][PASS] FRONT zonal HTTP service ready
+[local-checks] Running: REAR zonal HTTP service ready
+[{"id":"BCM","name":"Body Control Module","domain":"body","status":"online"},{"id":"HVAC","name":"Climate Control Module","domain":"climate","status":"online"}][PASS] REAR zonal HTTP service ready
+[local-checks] Running: central SOVD HTTP service ready
+{"vehicle_id":"SDV-DEMO-001","vehicle_name":"Virtual Software Defined Vehicle","overall":"online","zones":[{"id":"FRONT","name":"Front Zonal Controller","online":true,"detail":"HTTP 200"},{"id":"REAR","name":"Rear Zonal Controller","online":true,"detail":"HTTP 200"}]}[PASS] central SOVD HTTP service ready
+[local-checks] Running: FRONT DoIP TCP listener available
+TCP connection established to 10.77.10.2:13400
+[PASS] FRONT DoIP TCP listener available
+[local-checks] Running: boot-seeded ECM DTC appears in fault-listing route
+[{"code":"P0128","description":"Coolant thermostat temperature below threshold","active":true,"status":9}]
+Verified boot-seeded DTC P0128 through the fault-listing route
+[PASS] boot-seeded ECM DTC appears in fault-listing route
+[local-checks] Running: SOVD clear-faults execution reaches completed
+SOVD start response:
+{"id":"exec-0000000000000001","status":"running"}
+Execution ID: exec-0000000000000001
+SOVD execution history:
+{"items":["exec-0000000000000001"]}
+Verified execution exec-0000000000000001 is present in SOVD execution history
+Execution status response:
+{"status":"completed","capability":"execute"}
+Verified SOVD execution exec-0000000000000001 reached status=completed
+[PASS] SOVD clear-faults execution reaches completed
+[local-checks] Running: ECM DTC is gone after successful SOVD clear
+[]
+Verified ECM fault list is empty
+[PASS] ECM DTC is gone after successful SOVD clear
+[local-checks] Running: stop FRONT service for controlled negative case
+FRONT service stopped (PID 1191303)
+[PASS] stop FRONT service for controlled negative case
+[local-checks] Running: failed SOVD clear is recorded with status=failed
+SOVD start response:
+{"id":"exec-0000000000000002","status":"running"}
+Execution ID: exec-0000000000000002
+SOVD execution history:
+{"items":["exec-0000000000000001","exec-0000000000000002"]}
+Verified execution exec-0000000000000002 is present in SOVD execution history
+Execution status response:
+{"status":"failed","capability":"execute","error":[{"path":"/","error":{"error_code":"uds-transport-error","message":"Could not communicate with the zonal ECU service: error sending request for url (http://10.77.10.2:9001/ecus/ECM/diagnostics/operations/clear-faults)"}}]}
+Verified SOVD execution exec-0000000000000002 reached status=failed
+[PASS] failed SOVD clear is recorded with status=failed
+[local-checks] Running: restart FRONT service after negative case
+[local-checks] Starting FRONT in sdv-front-ns; log=/tmp/velosovd-local-checks.C9PH2R/front.log
+[local-checks] Starting FRONT in sdv-front-ns; log=/tmp/velosovd-local-checks.C9PH2R/front.log
+FRONT service PID=1191581 (launcher PID=1191576)
+[PASS] restart FRONT service after negative case
+[local-checks] Running: FRONT HTTP service recovers
+[{"id":"DOOR","name":"Door Control Module","domain":"body","status":"online"},{"id":"ECM","name":"Engine Control Module","domain":"powertrain","status":"online"},{"id":"LIGHTING","name":"Lighting Control Module","domain":"body","status":"online"}][PASS] FRONT HTTP service recovers
+[local-checks] Running: independent DoIP routing activation, 22 F1 90 and 14 FF FF FF -> 54
+Independent DoIP client: 10.77.10.2:13400, tester=0x0E00, ECU=0x1110
+Routing activation response: type=0x0006 payload=0E0011011000000000
+PASS routing activation: entity=0x1101, response_code=0x10
+UDS 22 F1 90 response: 62F19053445644454D4F30303030303030303031
+PASS UDS ReadDataByIdentifier 22 F1 90
+UDS 14 FF FF FF response: 54
+PASS UDS ClearDiagnosticInformation 14 FF FF FF -> 54
+[PASS] independent DoIP routing activation, 22 F1 90 and 14 FF FF FF -> 54
+[local-checks] Running: multi-frame ISO-TP request using isotpsend/isotprecv on vcan-front
+isotprecv exit=0 (0 means one response PDU was captured; 124 means receive timeout)
+ISO-TP request: 2EF1874142434445464748 (11 bytes)
+isotprecv response (hex): 7F 2E 11 
+
+Verified multi-frame request was reassembled; ECU returned 7F2E11
+[PASS] multi-frame ISO-TP request using isotpsend/isotprecv on vcan-front
+[local-checks] Running: Rust formatting
+[PASS] Rust formatting
+[local-checks] Running: Rust Clippy
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+[PASS] Rust Clippy
+[local-checks] Running: Rust workspace tests
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running unittests src/lib.rs (target/debug/deps/diagnostic_common-a9c00cf5a7e69ddc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/doip_gateway-f0d52073aebf6c31)
+
+running 50 tests
+test connection::tests::connection_starts_awaiting_activation ... ok
+test connection::tests::rejects_invalid_tester_address ... ok
+test connection::tests::closing_connection_disables_diagnostics ... ok
+test connection::tests::rejects_nonzero_reserved_field ... ok
+test connection::tests::rejects_second_activation ... ok
+test connection::tests::rejects_unsupported_activation_type ... ok
+test connection::tests::successful_activation_enables_diagnostics ... ok
+test diagnostic::tests::decode_and_encode_round_trip ... ok
+test diagnostic::tests::decodes_addresses_and_uds_payload ... ok
+test diagnostic::tests::encodes_addresses_in_network_byte_order ... ok
+test diagnostic::tests::rejects_empty_uds_payload ... ok
+test diagnostic::tests::rejects_payload_shorter_than_address_fields ... ok
+test header::tests::decodes_valid_header ... ok
+test header::tests::encodes_header_in_network_byte_order ... ok
+test header::tests::rejects_invalid_inverse_version ... ok
+test header::tests::rejects_oversized_payload ... ok
+test header::tests::rejects_truncated_header ... ok
+test header::tests::rejects_unsupported_protocol_version ... ok
+test payload::tests::converts_payload_type_back_to_raw_value ... ok
+test payload::tests::decodes_diagnostic_message_type ... ok
+test payload::tests::decodes_routing_activation_request ... ok
+test payload::tests::rejects_unknown_payload_type ... ok
+test router::tests::rejects_diagnostic_before_routing_activation ... ok
+test router::tests::preserves_suppressed_uds_response ... ok
+test router::tests::rejects_empty_uds_payload ... ok
+test router::tests::rejects_duplicate_target_registration ... ok
+test router::tests::rejects_unknown_target_address ... ok
+test router::tests::rejects_mismatched_tester_address ... ok
+test router::tests::routes_to_registered_ecu_and_reverses_addresses ... ok
+test routing::tests::encodes_logical_addresses_in_network_byte_order ... ok
+test routing::tests::rejects_invalid_request_length ... ok
+test routing::tests::rejects_invalid_response_length ... ok
+test routing::tests::routing_request_round_trip ... ok
+test routing::tests::routing_response_round_trip ... ok
+test transport::tests::rejects_oversized_outgoing_payload ... ok
+test transport::tests::rejects_invalid_header ... ok
+test transport::tests::receives_zero_length_payload ... ok
+test transport::tests::receives_complete_frame ... ok
+test transport::tests::detects_disconnect_during_header ... ok
+test transport::tests::detects_disconnect_during_payload ... ok
+test vehicle::tests::announcement_round_trip ... ok
+test vehicle::tests::decodes_eid_request ... ok
+test vehicle::tests::decodes_vin_request ... ok
+test vehicle::tests::rejects_invalid_announcement_length ... ok
+test vehicle::tests::rejects_invalid_eid_length ... ok
+test vehicle::tests::rejects_invalid_vin_length ... ok
+test transport::tests::sends_complete_frame ... ok
+test transport::tests::receives_fragmented_header_and_payload ... ok
+test transport::tests::connection_is_unusable_after_receive_timeout ... ok
+test transport::tests::times_out_on_incomplete_header ... ok
+
+test result: ok. 50 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running unittests src/main.rs (target/debug/deps/sovd_server-0102dff04d451caf)
+
+running 50 tests
+test clear_fault_response_tests::accepts_only_exact_one_byte_positive_response ... ok
+test clear_fault_response_tests::generic_error_json_uses_kebab_case_and_optional_vendor_code ... ok
+test clear_fault_response_tests::distinguishes_empty_truncated_wrong_sid_and_long_responses ... ok
+test clear_fault_response_tests::maps_negative_response_code ... ok
+test clear_fault_response_tests::rejects_malformed_response_hex ... ok
+test execution::manager::tests::creates_and_retrieves_execution ... ok
+test execution::manager::tests::filters_execution_history_by_ecu_and_operation ... ok
+test execution::manager::tests::registers_and_retrieves_executor ... ok
+test execution::manager::tests::rejects_duplicate_operation_registration ... ok
+test execution::manager::tests::evicts_oldest_terminal_execution_when_full ... ok
+test execution::manager::tests::never_evicts_active_execution ... ok
+test execution::manager::tests::rejects_duplicate_executor_registration ... ok
+test execution::manager::tests::rejects_executor_capability_mismatch ... ok
+test execution::manager::tests::rejects_executor_for_unknown_operation ... ok
+test execution::manager::tests::rejects_unknown_operations ... ok
+test execution::manager::tests::rejects_unsupported_stop_capability ... ok
+test execution::manager::tests::rejects_zero_capacity ... ok
+test execution::manager::tests::scheduler_rejects_zero_timeout ... ok
+test execution::manager::tests::shutdown_rejects_new_execution_requests ... ok
+test execution::manager::tests::scheduler_marks_execution_stopped_only_after_executor_acknowledges ... ok
+test execution::manager::tests::scheduler_contains_executor_panic_and_cleans_up_task ... ok
+test execution::model::tests::exposes_only_declared_capabilities ... ok
+test execution::model::tests::permits_confirmed_stop_lifecycle ... ok
+test execution::model::tests::permits_freeze_and_resume_when_executor_supports_them ... ok
+test execution::model::tests::permits_normal_execution_lifecycle ... ok
+test execution::model::tests::rejects_completion_without_running ... ok
+test execution::manager::tests::shutdown_waits_for_cooperative_executor_stop_acknowledgement ... ok
+test execution::model::tests::rejects_transitions_out_of_terminal_states ... ok
+test execution::manager::tests::scheduler_marks_successful_execution_completed ... ok
+test execution::manager::tests::scheduler_marks_executor_failure_failed ... ok
+test execution::manager::tests::scheduler_marks_timed_out_execution_failed ... ok
+test execution::manager::tests::scheduler_rejects_work_when_concurrency_limit_is_full ... ok
+test execution::manager::tests::shutdown_reports_non_cooperative_execution_after_grace_period ... ok
+test payload_forwarding_integration_tests::list_ecus_uses_configured_zonal_http_port ... ok
+test payload_validation_tests::accepts_maximum_payload ... ok
+test payload_validation_tests::accepts_mixed_case_hex ... ok
+test payload_validation_tests::accepts_normal_hex_payload ... ok
+test payload_validation_tests::rejects_empty_payload ... ok
+test payload_validation_tests::rejects_input_over_limit ... ok
+test payload_validation_tests::rejects_non_hexadecimal_characters ... ok
+test payload_validation_tests::rejects_odd_length_payload ... ok
+test payload_validation_tests::rejects_whitespace_only_payload ... ok
+test payload_validation_tests::removes_ascii_whitespace ... ok
+test payload_forwarding_integration_tests::forwards_normalized_payload_and_rejects_invalid_requests ... ok
+test payload_forwarding_integration_tests::operation_execution_routes_filter_by_operation_and_ecu ... ok
+test clear_fault_history_tests::negative_uds_response_is_recorded_as_failed_execution ... ok
+test payload_forwarding_integration_tests::retrieves_individual_fault_from_zonal_server ... ok
+test payload_forwarding_integration_tests::sovd_post_executes_operation_and_records_execution ... ok
+test payload_forwarding_integration_tests::retrieves_individual_operation_description ... ok
+test payload_forwarding_integration_tests::health_uses_configured_zonal_http_port ... ok
+
+test result: ok. 50 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.63s
+
+     Running unittests src/lib.rs (target/debug/deps/uds_protocol-d5bfa1478eab2431)
+
+running 23 tests
+test services::clear_diagnostic_information::tests::clearing_empty_store_returns_positive_response ... ok
+test services::clear_diagnostic_information::tests::rejects_unsupported_group ... ok
+test services::read_dtc_information::tests::rejects_unsupported_subfunction ... ok
+test services::read_dtc_information::tests::rejects_bad_length ... ok
+test services::clear_diagnostic_information::tests::rejects_invalid_request_length_with_nrc_13 ... ok
+test services::tester_present::tests::tester_present_rejects_bad_subfunction ... ok
+test services::read_dtc_information::tests::reports_matching_dtcs_and_status ... ok
+test services::tester_present::tests::tester_present_positive_response ... ok
+test services::tester_present::tests::tester_present_suppressed_response ... ok
+test services::clear_diagnostic_information::tests::clears_shared_dtc_store ... ok
+test session::tests::activity_refreshes_s3_deadline ... ok
+test session::tests::s3_expiry_returns_to_default ... ok
+test tests::default_session_is_active_at_startup ... ok
+test tests::enters_extended_session ... ok
+test tests::reads_extended_only_did_after_session_change ... ok
+test tests::reads_vin_in_default_session ... ok
+test tests::rejects_extended_only_did_in_default_session ... ok
+test tests::rejects_invalid_did_request_length ... ok
+test tests::rejects_unknown_did ... ok
+test tests::rejects_unknown_service ... ok
+test tests::rejects_unsupported_session ... ok
+test tests::s3_timeout_returns_to_default_session ... ok
+test tests::suppresses_positive_session_response ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/vehicle_topology-e36455b0a92ef676)
+
+running 2 tests
+test tests::current_vehicle_topology_is_valid ... ok
+test tests::rejects_invalid_can_identifier ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/virtual_ecu-ec78a363158c8287)
+
+running 21 tests
+test dtc_shared_state_integration_tests::http_and_uds_read_the_same_dtc_store ... ok
+test dtc_shared_state_integration_tests::http_delete_individual_fault_is_visible_through_uds ... ok
+test dtc_shared_state_integration_tests::http_delete_fault_returns_not_found_for_unknown_resources ... ok
+test dtc_shared_state_integration_tests::http_reads_individual_fault_from_shared_dtc_store ... ok
+test dtc_shared_state_integration_tests::clear_endpoint_returns_raw_uds_positive_response_and_clears_shared_store ... ok
+test tests::converts_sae_powertrain_dtc ... ok
+test dtc_shared_state_integration_tests::http_delete_fault_collection_clears_shared_dtc_store_through_uds ... ok
+test dtc_shared_state_integration_tests::http_delete_individual_fault_preserves_other_faults ... ok
+test dtc_shared_state_integration_tests::uds_clear_is_visible_through_http ... ok
+test tests::registry_rejects_duplicate_logical_address ... ok
+test doip::tests::rejects_diagnostic_message_before_routing_activation ... ok
+test tests::rejects_malformed_dtc ... ok
+test tests::registry_rejects_unknown_logical_address ... ok
+test uds_dispatcher::tests::disconnected_response_channel_is_reported ... ok
+test uds_dispatcher::tests::blocking_request_is_processed ... ok
+test tests::registry_resolves_configured_logical_address ... ok
+test uds_dispatcher::tests::stalled_actor_reports_queue_full_after_all_sixteen_slots_are_used ... ok
+test uds_dispatcher::tests::response_wait_times_out ... ok
+test uds_dispatcher::tests::stalled_actor_produces_deterministic_response_timeout ... ok
+test doip::tests::tcp_routing_activation_and_uds_diagnostic_exchange ... ok
+test doip_real_uds_integration_tests::doip_reads_vin_through_production_uds_dispatcher ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+   Doc-tests diagnostic_common
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests doip_gateway
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests uds_protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests vehicle_topology
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+[PASS] Rust workspace tests
+[local-checks] All checks attempted; EXIT cleanup will stop owned services and remove the owned network
+
+[local-checks] Cleanup started
+
+========== FINAL SERVICE OUTPUT: /tmp/velosovd-local-checks.C9PH2R/front.log ==========
+[TOPOLOGY] Loaded vehicle 'Virtual Software Defined Vehicle' (SDV-DEMO-001)
+[TOPOLOGY] Configured zones: 2, ECUs: 5
+[ZONE] Runtime zone: FRONT | ECU count: 3
+[TOPOLOGY] ECU=ECM ZONE=FRONT CAN=vcan-front RX=0x620 TX=0x628
+[TOPOLOGY] ECU=LIGHTING ZONE=FRONT CAN=vcan-front RX=0x650 TX=0x658
+[TOPOLOGY] ECU=DOOR ZONE=FRONT CAN=vcan-front RX=0x660 TX=0x668
+[ECM][ISO-TP] Listening on vcan-front: RX=0x620, TX=0x628
+[LIGHTING][ISO-TP] Listening on vcan-front: RX=0x650, TX=0x658
+[DoIP] Prepared diagnostic router for 3 ECU(s)
+[DOOR][ISO-TP] Listening on vcan-front: RX=0x660, TX=0x668
+[DoIP] TCP listener active at 10.77.10.2:13400 | entity logical address 0x1101
+[HTTP] Virtual ECU API listening at http://0.0.0.0:9001
+[ISO-TP] Started 3 configured ECU endpoint(s)
+[DoIP] Client connected: 10.77.10.1:42576
+[DoIP] 10.77.10.1:42576: routing active for tester 0x0E00
+[DoIP] 10.77.10.1:42576: receive failed: Io(Custom { kind: UnexpectedEof, error: "early eof" })
+[DoIP] Client disconnected: 10.77.10.1:42576
+[ECM][UDS][RX] 2E F1 87 41 42 43 44 45 46 47 48
+[ECM][UDS][TX] 7F 2E 11
+
+========== FINAL SERVICE OUTPUT: /tmp/velosovd-local-checks.C9PH2R/rear.log ==========
+[TOPOLOGY] Loaded vehicle 'Virtual Software Defined Vehicle' (SDV-DEMO-001)
+[TOPOLOGY] Configured zones: 2, ECUs: 5
+[ZONE] Runtime zone: REAR | ECU count: 2
+[TOPOLOGY] ECU=BCM ZONE=REAR CAN=vcan-rear RX=0x630 TX=0x638
+[TOPOLOGY] ECU=HVAC ZONE=REAR CAN=vcan-rear RX=0x640 TX=0x648
+[BCM][ISO-TP] Listening on vcan-rear: RX=0x630, TX=0x638
+[DoIP] Prepared diagnostic router for 2 ECU(s)
+[DoIP] TCP listener active at 10.77.10.6:13400 | entity logical address 0x1102
+[HVAC][ISO-TP] Listening on vcan-rear: RX=0x640, TX=0x648
+[HTTP] Virtual ECU API listening at http://0.0.0.0:9001
+[ISO-TP] Started 2 configured ECU endpoint(s)
+
+========== FINAL SERVICE OUTPUT: /tmp/velosovd-local-checks.C9PH2R/central.log ==========
+[SOVD] Vehicle: Virtual Software Defined Vehicle (SDV-DEMO-001)
+[SOVD] Listening at http://0.0.0.0:8010
+[SOVD] Configured zones: 2
+[SOVD] Configured ECUs: 5
+[SOVD] Operation history capacity: 128
+FRONT service stopped (PID 1191581)
+[PASS] stop FRONT service
+REAR service stopped (PID 1191341)
+[PASS] stop REAR service
+CENTRAL service stopped (PID 1191373)
+[PASS] stop central service
+[sovd-network] Deleted owned namespace sdv-front-ns
+[sovd-network] Deleted owned namespace sdv-rear-ns
+[sovd-network] Deleted owned namespace sdv-central-ns
+[sovd-network] SOVD network removed.
+[PASS] tear down owned namespaces, veth links and vCAN interfaces
+
+========== LOCAL END-TO-END SUMMARY ==========
+Passed:  36
+Failed:  0
+Skipped: 0
+Total:   36
+Log:     /tmp/velosovd-local-checks.C9PH2R/run.log
