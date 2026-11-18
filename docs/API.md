@@ -33,6 +33,7 @@ use the ECU identifier configured in the vehicle topology.
 | GET | `/api/ecus/{id}/resources` | Discover ECU resources |
 | GET | `/api/ecus/{id}/operations` | Discover ECU operations |
 | GET | `/api/ecus/{id}/diagnostics/faults` | Read diagnostic faults |
+| DELETE | `/api/ecus/{id}/diagnostics/faults` | Clear all faults through UDS service 0x14 |
 | GET | `/api/ecus/{id}/operations/executions` | List operation executions |
 | GET | `/api/ecus/{id}/operations/executions/{execution_id}` | Read an operation execution |
 | POST | `/api/ecus/{id}/diagnostics/requests` | Submit a raw UDS request |
@@ -124,9 +125,12 @@ An operation descriptor contains:
 
 ### `POST /api/ecus/{id}/diagnostics/operations/clear-faults`
 
-Invokes the clear-fault operation directly through the zonal ECU service.
-This route returns the ECU operation result and does not create an entry
-in the central operation-execution history.
+Invokes UDS ClearDiagnosticInformation using the all-DTC group
+(`14 FF FF FF`) through the zonal ECU's per-ECU dispatcher. The zonal
+response contains `ecu_id`, `request_hex` and the raw UDS response in
+`response_hex`. The central service treats the clear as successful only
+when `response_hex` is exactly `54`. This direct route does not create an
+entry in the central operation-execution history.
 
 ### `POST /api/ecus/{id}/operations/clear-faults/executions`
 
@@ -162,6 +166,15 @@ semantics, cancellation, durable history, or exactly-once execution.
 ### `GET /api/ecus/{id}/diagnostics/faults`
 
 Returns diagnostic fault information for the selected ECU.
+
+### `DELETE /api/ecus/{id}/diagnostics/faults`
+
+Clears the complete fault collection by dispatching UDS request
+`14 FF FF FF`. The zonal handler returns HTTP 204 only when the UDS response
+is exactly `54`; a negative, absent or unexpected response is an error.
+
+Individual fault deletion remains a separate demonstrator operation and
+does not represent UDS service `0x14`.
 
 An optional query parameter is supported:
 
