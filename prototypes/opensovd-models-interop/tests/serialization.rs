@@ -3,7 +3,7 @@ use opensovd_models::{
     error::{DataError, ErrorCode, ErrorDetails, GenericError},
     version::{SovdInfo, VendorInfo, VersionInfo},
 };
-use serde_json::{Value, json};
+use serde_json::json;
 
 #[test]
 fn generic_error_serializes_to_expected_sovd_shape_and_round_trips() {
