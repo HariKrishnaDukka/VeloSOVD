@@ -34,10 +34,23 @@ cargo audit
 cargo deny check
 ```
 
-Commit the generated `Cargo.lock` when updating this prototype. The lockfile is specific to this standalone crate; the root VeloSOVD workspace lockfile is not used by this nested workspace.
+The generated `Cargo.lock` is committed beside this manifest. Regenerate it only when intentionally updating the dependency graph; review the resulting diff and keep the upstream Git revision immutable.
 
 ## Interpretation limits
 
 Passing tests establish only that these selected Rust types can be constructed and serialized/deserialized at the pinned source revision. They do not establish ISO 17978-3 conformance, compatibility with VeloSOVD HTTP status mapping, endpoint behavior, runtime adoption suitability, or production security.
 
-Build duration, binary size, resolved dependency count, and full transitive license review must be measured from the generated lockfile on a Rust-enabled runner. No footprint claim is made here.
+## GitHub CI baseline (2026-11-18)
+
+Measured on the GitHub-hosted `ubuntu-latest` x86_64 runner with Rust/Cargo 1.100.0:
+
+- Prototype lockfile: 17 package entries (15 registry packages, the pinned upstream Git package, and this local prototype package).
+- Additional registry packages compared with the VeloSOVD root lockfile: 3 — `autocfg 1.5.1`, `chrono 0.4.45`, and `num-traits 0.2.19`. The remaining registry package versions are already present in the root lockfile.
+- Clean release build: 5 seconds as reported by the CI shell timer.
+- Release executable: 509,584 bytes on the CI runner. This is a host-build measurement, not an embedded target footprint.
+- Serialization tests: 6 passed, 0 failed.
+- `cargo fmt` and Clippy: passed.
+- `cargo audit`: reports RustSec advisory `RUSTSEC-2026-0543` for `chrono 0.4.45` as unmaintained; no fixed upgrade is available at the time of this run.
+- License/source checks are run separately from the advisory check so the unmaintained warning remains visible without being silently ignored. The prototype is not approved for production adoption.
+
+The dependency graph and measurements are runner-specific. Re-run them when the toolchain or lockfile changes.

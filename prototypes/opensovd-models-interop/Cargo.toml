@@ -3,6 +3,7 @@ name = "opensovd-models-interop"
 version = "0.1.0"
 edition = "2024"
 publish = false
+license = "Apache-2.0"
 description = "Isolated serialization prototype for Eclipse OpenSOVD models"
 
 [dependencies]

@@ -68,7 +68,7 @@ jobs:
         run: |
           cargo generate-lockfile
           cargo audit
-          cargo deny check
+          cargo deny check bans licenses sources
 
   frontend:
     name: Frontend lint and build
