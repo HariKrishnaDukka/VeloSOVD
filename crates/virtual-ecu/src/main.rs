@@ -15,7 +15,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use diagnostic_common::{DiagnosticFault, DiagnosticValue, EcuInfo};
 use doip_gateway::{DiagnosticRouter, RouterError, UdsDispatchFailure, UdsRequestHandler};
