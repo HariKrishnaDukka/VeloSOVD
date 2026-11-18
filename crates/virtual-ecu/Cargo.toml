@@ -14,3 +14,7 @@ libc = "0.2"
 uds-protocol = { path = "../uds-protocol" }
 vehicle-topology = { path = "../vehicle-topology" }
 doip-gateway = { path = "../doip-gateway" }
+
+axum-server.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
