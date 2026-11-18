@@ -199,6 +199,15 @@ submit_sovd_execution() {
     printf 'SOVD start response:\n%s\n' "$response"
     execution_id="$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
     printf 'Execution ID: %s\n' "$execution_id"
+    history_body="$(http_json "$CENTRAL_URL/sovd/v1/components/ECM/operations/clear-faults/executions")"
+    printf 'SOVD execution history:\n%s\n' "$history_body"
+    printf '%s' "$history_body" | python3 -c '
+import json,sys
+expected=sys.argv[1]
+items=json.load(sys.stdin).get("items",[])
+assert expected in items, f"execution {expected} was not present in history {items!r}"
+print(f"Verified execution {expected} is present in SOVD execution history")
+' "$execution_id"
     status=""
     for attempt in $(seq 1 60); do
         status_body="$(http_json "$CENTRAL_URL/sovd/v1/components/ECM/operations/clear-faults/executions/$execution_id")"
