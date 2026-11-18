@@ -279,6 +279,9 @@ fn validate_clear_fault_response(response_hex: Option<&str>) -> Result<(), Clear
     if bytes.len() == 3 && bytes[0] == 0x7F && bytes[1] == 0x14 {
         return Err(ClearFaultError::NegativeResponse(bytes[2]));
     }
+    if bytes.len() >= 2 && bytes[0] == 0x7F && bytes[1] != 0x14 {
+        return Err(ClearFaultError::WrongResponseSid(bytes[1]));
+    }
     if bytes.len() == 1 {
         return Err(ClearFaultError::WrongResponseSid(bytes[0]));
     }
@@ -2449,6 +2452,175 @@ mod payload_forwarding_integration_tests {
             .expect("Unknown ECU deletion must complete");
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        central_task.abort();
+        mock_task.abort();
+    }
+}
+
+#[cfg(test)]
+mod clear_fault_response_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_only_exact_one_byte_positive_response() {
+        assert_eq!(validate_clear_fault_response(Some("54")), Ok(()));
+    }
+
+    #[test]
+    fn maps_negative_response_code() {
+        assert!(matches!(
+            validate_clear_fault_response(Some("7F1431")),
+            Err(ClearFaultError::NegativeResponse(0x31))
+        ));
+    }
+
+    #[test]
+    fn distinguishes_empty_truncated_wrong_sid_and_long_responses() {
+        assert!(matches!(
+            validate_clear_fault_response(None),
+            Err(ClearFaultError::EmptyResponse)
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("")),
+            Err(ClearFaultError::EmptyResponse)
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("7F14")),
+            Err(ClearFaultError::TruncatedResponse)
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("55")),
+            Err(ClearFaultError::WrongResponseSid(0x55))
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("7F2231")),
+            Err(ClearFaultError::WrongResponseSid(0x22))
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("5400")),
+            Err(ClearFaultError::UnexpectedResponseLength(2))
+        ));
+    }
+
+    #[test]
+    fn rejects_malformed_response_hex() {
+        assert!(matches!(
+            validate_clear_fault_response(Some("5Z")),
+            Err(ClearFaultError::MalformedResponse(_))
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("5")),
+            Err(ClearFaultError::MalformedResponse(_))
+        ));
+    }
+
+    #[test]
+    fn generic_error_json_uses_kebab_case_and_optional_vendor_code() {
+        let negative = ClearFaultError::NegativeResponse(0x31).generic_error();
+        let negative_json = serde_json::to_value(negative).unwrap();
+        assert_eq!(negative_json["error_code"], "uds-negative-response");
+        assert_eq!(negative_json["vendor_code"], "UDS_NRC_0x31");
+        assert!(negative_json["message"].as_str().is_some());
+
+        let empty = ClearFaultError::EmptyResponse.generic_error();
+        let empty_json = serde_json::to_value(empty).unwrap();
+        assert_eq!(empty_json["error_code"], "uds-empty-response");
+        assert!(empty_json.get("vendor_code").is_none());
+    }
+}
+
+#[cfg(test)]
+mod clear_fault_history_tests {
+    use super::*;
+    use axum::routing::post;
+    use serde_json::Value;
+    use std::path::PathBuf;
+
+    async fn mock_negative_clear() -> Json<UdsDiagnosticResponse> {
+        Json(UdsDiagnosticResponse {
+            ecu_id: "ECM".to_string(),
+            request_hex: "14FFFFFF".to_string(),
+            response_hex: Some("7F1431".to_string()),
+        })
+    }
+
+    #[tokio::test]
+    async fn negative_uds_response_is_recorded_as_failed_execution() {
+        let topology_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../platform/config/vehicle-topology.toml");
+        let mut topology = VehicleTopology::load(&topology_path).expect("Test topology must load");
+
+        for zone in &mut topology.zones {
+            zone.zonal_ip = "127.0.0.1".to_string();
+        }
+
+        let mock_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Mock zonal listener must bind");
+        let mock_port = mock_listener.local_addr().unwrap().port();
+        let mock_app = Router::new().route(
+            "/ecus/ECM/diagnostics/operations/clear-faults",
+            post(mock_negative_clear),
+        );
+        let mock_task = tokio::spawn(async move {
+            axum::serve(mock_listener, mock_app)
+                .await
+                .expect("Mock zonal server failed");
+        });
+
+        let state = AppState {
+            client: Client::builder()
+                .timeout(Duration::from_secs(3))
+                .build()
+                .expect("HTTP client must initialize"),
+            topology,
+            zonal_http_port: mock_port,
+            next_execution_id: Arc::new(AtomicU64::new(1)),
+            executions: Arc::new(Mutex::new(VecDeque::with_capacity(
+                EXECUTION_HISTORY_CAPACITY,
+            ))),
+            execution_manager: Arc::new(OnceCell::new()),
+        };
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Central listener must bind");
+        let address = listener.local_addr().unwrap();
+        let central_task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("Central server failed");
+        });
+
+        let client = Client::new();
+        let base = format!("http://{address}");
+        let response = client
+            .post(format!(
+                "{base}/api/ecus/ECM/operations/clear-faults/executions"
+            ))
+            .send()
+            .await
+            .expect("Clear execution request must complete");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let execution: Value = response.json().await.unwrap();
+        assert_eq!(execution["success"], false);
+        assert_eq!(execution["status"], "failed");
+        assert!(execution["message"].as_str().unwrap().contains("NRC 0x31"));
+
+        let history_response = client
+            .get(format!(
+                "{base}/api/ecus/ECM/operations/clear-faults/executions"
+            ))
+            .send()
+            .await
+            .expect("Execution history request must complete");
+        assert_eq!(history_response.status(), StatusCode::OK);
+        let history: Value = history_response.json().await.unwrap();
+        assert_eq!(history.as_array().unwrap().len(), 1);
+        assert_eq!(history[0]["success"], false);
+        assert_eq!(history[0]["status"], "failed");
 
         central_task.abort();
         mock_task.abort();
