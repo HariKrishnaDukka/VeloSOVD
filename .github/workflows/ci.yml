@@ -63,6 +63,13 @@ jobs:
       - name: Check dependency policies
         run: cargo deny check
 
+      - name: Audit isolated OpenSOVD prototype dependencies
+        working-directory: prototypes/opensovd-models-interop
+        run: |
+          cargo generate-lockfile
+          cargo audit
+          cargo deny check
+
   frontend:
     name: Frontend lint and build
     runs-on: ubuntu-latest
@@ -135,18 +142,6 @@ jobs:
           end_time=$(date +%s)
           printf 'Clean release build elapsed seconds: %s\n' "$((end_time - start_time))"
           stat -c 'Release binary size bytes: %s' target/release/opensovd-models-interop
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
-      - name: Audit prototype dependencies
-        run: cargo audit
-
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
-
-      - name: Check prototype dependency licenses and sources
-        run: cargo deny check
 
       - name: Upload generated lockfile and dependency report
         if: always()
