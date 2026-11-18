@@ -1788,11 +1788,11 @@ mod payload_forwarding_integration_tests {
     async fn sovd_post_executes_operation_and_records_execution() {
         use axum::routing::post;
 
-        async fn mock_clear_faults() -> Json<OperationResult> {
-            Json(OperationResult {
-                operation: "clear_faults".to_string(),
-                success: true,
-                message: "ECM fault memory cleared".to_string(),
+        async fn mock_clear_faults() -> Json<UdsDiagnosticResponse> {
+            Json(UdsDiagnosticResponse {
+                ecu_id: "ECM".to_string(),
+                request_hex: "14FFFFFF".to_string(),
+                response_hex: Some("54".to_string()),
             })
         }
 
