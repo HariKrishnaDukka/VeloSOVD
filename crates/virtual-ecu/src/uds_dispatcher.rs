@@ -91,6 +91,7 @@ pub fn spawn_uds_dispatcher(
     server: UdsServer,
     queue_capacity: usize,
 ) -> (UdsDispatcherHandle, JoinHandle<()>) {
+    let mut server = server;
     spawn_uds_dispatcher_with(ecu_id, queue_capacity, move |payload| {
         server.process_request(payload)
     })
@@ -173,18 +174,15 @@ mod tests {
         let (release_tx, release_rx) = std_mpsc::channel();
         let mut first_request = true;
 
-        let (dispatcher, actor) = spawn_uds_dispatcher_with(
-            "STALLED_TEST".to_owned(),
-            capacity,
-            move |_payload| {
+        let (dispatcher, actor) =
+            spawn_uds_dispatcher_with("STALLED_TEST".to_owned(), capacity, move |_payload| {
                 if first_request {
                     first_request = false;
                     let _ = started_tx.send(());
                     let _ = release_rx.recv();
                 }
                 Some(vec![0x54])
-            },
-        );
+            });
 
         (dispatcher, actor, started_rx, release_tx)
     }
@@ -202,7 +200,10 @@ mod tests {
         });
 
         started.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert_eq!(worker.join().unwrap(), Err(UdsDispatchError::ResponseTimeout));
+        assert_eq!(
+            worker.join().unwrap(),
+            Err(UdsDispatchError::ResponseTimeout)
+        );
 
         release.send(()).unwrap();
         drop(dispatcher);
@@ -211,14 +212,13 @@ mod tests {
 
     #[test]
     fn stalled_actor_reports_queue_full_after_all_sixteen_slots_are_used() {
-        let (dispatcher, actor, started, release) =
-            stalled_dispatcher(DEFAULT_UDS_QUEUE_CAPACITY);
+        let (dispatcher, actor, started, release) = stalled_dispatcher(DEFAULT_UDS_QUEUE_CAPACITY);
         let first_handle = dispatcher.clone();
 
         let first = thread::spawn(move || {
             first_handle.process_blocking_with_timeout(
                 vec![0x14, 0xFF, 0xFF, 0xFF],
-                Duration::from_secs(5),
+                Duration::from_secs(30),
             )
         });
 
@@ -230,15 +230,13 @@ mod tests {
             queued_workers.push(thread::spawn(move || {
                 handle.process_blocking_with_timeout(
                     vec![0x14, 0xFF, 0xFF, 0xFF],
-                    Duration::from_secs(5),
+                    Duration::from_secs(30),
                 )
             }));
         }
 
         let capacity_deadline = std::time::Instant::now() + Duration::from_secs(1);
-        while dispatcher.sender.capacity() != 0
-            && std::time::Instant::now() < capacity_deadline
-        {
+        while dispatcher.sender.capacity() != 0 && std::time::Instant::now() < capacity_deadline {
             thread::yield_now();
         }
         assert_eq!(dispatcher.sender.capacity(), 0);

@@ -113,7 +113,7 @@ struct SovdStartExecutionRequest {
     proximity_response: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 struct SovdGenericError {
     error_code: String,
     message: String,
@@ -133,7 +133,7 @@ impl IntoResponse for SovdApiError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum ClearFaultError {
     NegativeResponse(u8),
     EmptyResponse,
@@ -146,7 +146,10 @@ enum ClearFaultError {
     DispatcherUnavailable,
     ResponseUnavailable,
     Transport(String),
-    Upstream { status: StatusCode, error: SovdGenericError },
+    Upstream {
+        status: StatusCode,
+        error: SovdGenericError,
+    },
 }
 
 impl ClearFaultError {
@@ -256,7 +259,7 @@ fn decode_uds_response_hex(input: &str) -> Result<Vec<u8>, ClearFaultError> {
     }
 
     let mut bytes = Vec::with_capacity(input.len() / 2);
-    for pair in input.as_bytes().chunks_exact(2) {
+    for pair in input.as_bytes().as_chunks::<2>().0 {
         let pair = std::str::from_utf8(pair)
             .map_err(|error| ClearFaultError::MalformedResponse(error.to_string()))?;
         let byte = u8::from_str_radix(pair, 16)
@@ -298,10 +301,16 @@ async fn invoke_clear_faults(client: &Client, url: String) -> Result<(), ClearFa
     })?;
 
     if !response.status().is_success() {
-        let status = StatusCode::from_u16(response.status().as_u16())
-            .unwrap_or(StatusCode::BAD_GATEWAY);
+        let status =
+            StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         if let Ok(error) = response.json::<SovdGenericError>().await {
-            return Err(ClearFaultError::Upstream { status, error });
+            return Err(match error.error_code.as_str() {
+                "queue-full" => ClearFaultError::QueueFull,
+                "dispatcher-unavailable" => ClearFaultError::DispatcherUnavailable,
+                "response-unavailable" => ClearFaultError::ResponseUnavailable,
+                "timeout" => ClearFaultError::Timeout,
+                _ => ClearFaultError::Upstream { status, error },
+            });
         }
         return Err(match status {
             StatusCode::GATEWAY_TIMEOUT => ClearFaultError::Timeout,
@@ -718,9 +727,7 @@ async fn delete_faults(
         .delete(format!("{url}/diagnostics/faults"))
         .send()
         .await
-        .map_err(|error| {
-            SovdApiError::from(ClearFaultError::Transport(error.to_string()))
-        })?;
+        .map_err(|error| SovdApiError::from(ClearFaultError::Transport(error.to_string())))?;
 
     let status = response.status();
 
@@ -731,7 +738,10 @@ async fn delete_faults(
             .await
             .unwrap_or_else(|_| SovdGenericError {
                 error_code: "uds-transport-error".to_string(),
-                message: format!("Zonal fault collection DELETE returned HTTP {}", status.as_u16()),
+                message: format!(
+                    "Zonal fault collection DELETE returned HTTP {}",
+                    status.as_u16()
+                ),
                 vendor_code: None,
             });
         return Err(SovdApiError { status, error });
@@ -1809,7 +1819,15 @@ mod payload_forwarding_integration_tests {
     async fn sovd_post_executes_operation_and_records_execution() {
         use axum::routing::post;
 
-        async fn mock_clear_faults() -> Json<UdsDiagnosticResponse> {
+        type MockDtcStore = Arc<StdMutex<Vec<String>>>;
+
+        async fn mock_clear_faults(
+            State(dtcs): State<MockDtcStore>,
+        ) -> Json<UdsDiagnosticResponse> {
+            dtcs.lock()
+                .expect("Mock DTC store lock must succeed")
+                .clear();
+
             Json(UdsDiagnosticResponse {
                 ecu_id: "ECM".to_string(),
                 request_hex: "14FFFFFF".to_string(),
@@ -1835,10 +1853,13 @@ mod payload_forwarding_integration_tests {
             .expect("Mock zonal address must be available")
             .port();
 
-        let mock_app = Router::new().route(
-            "/ecus/ECM/diagnostics/operations/clear-faults",
-            post(mock_clear_faults),
-        );
+        let seeded_dtcs = Arc::new(StdMutex::new(vec!["P0128".to_string()]));
+        let mock_app = Router::new()
+            .route(
+                "/ecus/ECM/diagnostics/operations/clear-faults",
+                post(mock_clear_faults),
+            )
+            .with_state(Arc::clone(&seeded_dtcs));
 
         let mock_task = tokio::spawn(async move {
             axum::serve(mock_listener, mock_app)
@@ -1977,6 +1998,10 @@ mod payload_forwarding_integration_tests {
         assert_eq!(final_status["status"], "completed");
         assert_eq!(final_status["capability"], "execute");
         assert!(final_status.get("error").is_none());
+        assert!(
+            seeded_dtcs.lock().unwrap().is_empty(),
+            "The seeded DTC must be cleared by the accepted UDS positive response"
+        );
 
         // Unsupported operation IDs must not be forwarded.
         let response = client
@@ -2639,6 +2664,46 @@ mod clear_fault_history_tests {
         assert_eq!(history.as_array().unwrap().len(), 1);
         assert_eq!(history[0]["success"], false);
         assert_eq!(history[0]["status"], "failed");
+
+        // The SOVD-facing execution adapter must expose the same failure as
+        // a generic error object with a kebab-case error_code.
+        let start = client
+            .post(format!(
+                "{base}/sovd/v1/components/ECM/operations/clear-faults/executions"
+            ))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .expect("SOVD negative-response execution must start");
+        assert_eq!(start.status(), StatusCode::ACCEPTED);
+        let start_body: Value = start.json().await.unwrap();
+        let sovd_execution_id = start_body["id"].as_str().unwrap();
+
+        let mut sovd_status = Value::Null;
+        for _ in 0..100 {
+            let response = client
+                .get(format!(
+                    "{base}/sovd/v1/components/ECM/operations/clear-faults/executions/{sovd_execution_id}"
+                ))
+                .send()
+                .await
+                .expect("SOVD execution status request must complete");
+            sovd_status = response.json().await.unwrap();
+            if sovd_status["status"] == "failed" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        assert_eq!(sovd_status["status"], "failed");
+        assert_eq!(
+            sovd_status["error"][0]["error"]["error_code"],
+            "uds-negative-response"
+        );
+        assert_eq!(
+            sovd_status["error"][0]["error"]["vendor_code"],
+            "UDS_NRC_0x31"
+        );
 
         central_task.abort();
         mock_task.abort();

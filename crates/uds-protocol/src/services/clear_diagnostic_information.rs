@@ -53,10 +53,7 @@ mod tests {
     fn clearing_empty_store_returns_positive_response() {
         let store = new_dtc_store(Vec::new());
 
-        assert_eq!(
-            handle(&[0x14, 0xFF, 0xFF, 0xFF], &store),
-            Some(vec![0x54])
-        );
+        assert_eq!(handle(&[0x14, 0xFF, 0xFF, 0xFF], &store), Some(vec![0x54]));
         assert!(store.lock().unwrap().is_empty());
     }
 
