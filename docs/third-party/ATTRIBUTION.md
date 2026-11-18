@@ -1,12 +1,14 @@
 # Third-party attribution register
 
-**Status:** Empty — no third-party source code or packages have been approved for reuse in this register.
+**Status:** One isolated prototype dependency recorded; no third-party source code has been copied or vendored into production crates.
 
-This register records third-party code or assets incorporated into VeloSOVD. A repository's declared license is not a substitute for reviewing file-level notices, applicable `NOTICE` files, and dependency licenses.
+This register records third-party code, packages, and assets incorporated into VeloSOVD. A repository's declared license is not a substitute for reviewing file-level notices, applicable `NOTICE` files, and dependency licenses.
 
 ## Register
 
-No entries yet.
+| Component | Upstream and immutable revision | Use in VeloSOVD | License / notices | Review status |
+|---|---|---|---|---|
+| `opensovd-models` 0.1.1 | [eclipse-opensovd/opensovd-core](https://github.com/eclipse-opensovd/opensovd-core), commit `27cdad1437cc70bb704779ce025a465c6d32ea6b` | Git dependency used only by `prototypes/opensovd-models-interop` to evaluate error and version-info serialization. No upstream source files copied; no production crate depends on it. | Upstream repository declares Apache-2.0. Preserve the upstream license and applicable notices if redistributing or copying source. A root-level `NOTICE` file was not found at the inspected revision; nested notice inventory and resolved transitive dependency licenses remain to be checked. | Direct package license identified; transitive license/security audit pending generated prototype lockfile and CI. Not approved for production adoption. |
 
 ## Required entry fields
 

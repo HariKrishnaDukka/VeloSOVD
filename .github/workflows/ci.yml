@@ -88,3 +88,72 @@ jobs:
 
       - name: Build frontend (includes TypeScript project checks)
         run: npm run build
+
+  opensovd-models-prototype:
+    name: Isolated OpenSOVD models prototype
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: prototypes/opensovd-models-interop
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust with required components
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Record Rust toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Resolve and lock the pinned dependency graph
+        run: cargo generate-lockfile
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Run prototype serialization tests
+        run: cargo test --locked
+
+      - name: Record resolved normal dependency tree
+        run: |
+          cargo tree -e normal --prefix none | sort -u | tee dependency-tree.txt
+          printf 'Unique package/version entries: '
+          wc -l < dependency-tree.txt
+
+      - name: Measure clean release build and binary size
+        run: |
+          cargo clean
+          start_time=$(date +%s)
+          cargo build --release --locked
+          end_time=$(date +%s)
+          printf 'Clean release build elapsed seconds: %s\n' "$((end_time - start_time))"
+          stat -c 'Release binary size bytes: %s' target/release/opensovd-models-interop
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit prototype dependencies
+        run: cargo audit
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: Check prototype dependency licenses and sources
+        run: cargo deny check
+
+      - name: Upload generated lockfile and dependency report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opensovd-models-prototype-dependency-report
+          path: |
+            prototypes/opensovd-models-interop/Cargo.lock
+            prototypes/opensovd-models-interop/dependency-tree.txt
+          if-no-files-found: warn

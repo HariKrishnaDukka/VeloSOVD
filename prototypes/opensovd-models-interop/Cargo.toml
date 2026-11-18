@@ -1,0 +1,12 @@
+[package]
+name = "opensovd-models-interop"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Isolated serialization prototype for Eclipse OpenSOVD models"
+
+[dependencies]
+opensovd-models = { git = "https://github.com/eclipse-opensovd/opensovd-core.git", rev = "27cdad1437cc70bb704779ce025a465c6d32ea6b" }
+serde_json = "1"
+
+[workspace]
