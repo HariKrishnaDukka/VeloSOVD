@@ -18,7 +18,7 @@ The host must be Linux and provide:
 
 - Rust/Cargo and the repository's locked dependencies.
 - `iproute2`, `iputils-ping`, `sudo`, and permission to create network namespaces.
-- Kernel virtual CAN support and permission to load `vcan`.
+- Kernel virtual CAN support and permission to load `vcan` and the Linux CAN ISO-TP protocol (`can-isotp`, either modular or built into the kernel).
 - Python 3, `curl`, `timeout`, and `xxd`.
 - `can-utils`, specifically `isotpsend` and `isotprecv`.
 
