@@ -361,12 +361,7 @@ async fn delete_faults(
     State(dispatchers): State<DiagnosticDispatcherRegistry>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, UdsApiError> {
-    let response = dispatch_uds_payload(
-        &dispatchers,
-        id,
-        vec![0x14, 0xFF, 0xFF, 0xFF],
-    )
-    .await?;
+    let response = dispatch_uds_payload(&dispatchers, id, vec![0x14, 0xFF, 0xFF, 0xFF]).await?;
 
     // Collection deletion is successful only for the exact UDS positive
     // response. A negative, suppressed, or malformed response is a failure.
@@ -415,13 +410,9 @@ async fn clear_faults(
 ) -> Result<Json<UdsDiagnosticResponse>, UdsApiError> {
     // Return the raw UDS response in hexadecimal form. The central SOVD
     // service is responsible for accepting exactly one byte: 0x54.
-    dispatch_uds_payload(
-        &dispatchers,
-        id,
-        vec![0x14, 0xFF, 0xFF, 0xFF],
-    )
-    .await
-    .map(Json)
+    dispatch_uds_payload(&dispatchers, id, vec![0x14, 0xFF, 0xFF, 0xFF])
+        .await
+        .map(Json)
 }
 
 fn make_ecu(
@@ -685,10 +676,7 @@ async fn main() {
 
     let diagnostic_router = Router::new()
         .route("/ecus/{id}/diagnostics/requests", post(diagnostic_request))
-        .route(
-            "/ecus/{id}/diagnostics/faults",
-            delete(delete_faults),
-        )
+        .route("/ecus/{id}/diagnostics/faults", delete(delete_faults))
         .route(
             "/ecus/{id}/diagnostics/operations/clear-faults",
             post(clear_faults),
@@ -699,10 +687,7 @@ async fn main() {
         .route("/ecus", get(list_ecus))
         .route("/ecus/{id}", get(ecu_info))
         .route("/ecus/{id}/data/vehicle-speed", get(vehicle_speed))
-        .route(
-            "/ecus/{id}/diagnostics/faults",
-            get(read_faults),
-        )
+        .route("/ecus/{id}/diagnostics/faults", get(read_faults))
         .route(
             "/ecus/{id}/diagnostics/faults/{fault_code}",
             get(read_fault).delete(delete_fault),
@@ -1117,7 +1102,10 @@ mod dtc_shared_state_integration_tests {
 
         assert!(matches!(
             unknown_collection,
-            Err(UdsApiError { status: StatusCode::NOT_FOUND, .. })
+            Err(UdsApiError {
+                status: StatusCode::NOT_FOUND,
+                ..
+            })
         ));
 
         drop(dispatchers);
@@ -1134,12 +1122,9 @@ mod dtc_shared_state_integration_tests {
         };
         let (dispatchers, actor) = test_dispatcher(dtcs.clone());
 
-        let clear_response = clear_faults(
-            State(dispatchers.clone()),
-            Path("ECM".to_string()),
-        )
-        .await
-        .expect("Clear endpoint must dispatch UDS service 0x14");
+        let clear_response = clear_faults(State(dispatchers.clone()), Path("ECM".to_string()))
+            .await
+            .expect("Clear endpoint must dispatch UDS service 0x14");
 
         assert_eq!(clear_response.0.ecu_id, "ECM");
         assert_eq!(clear_response.0.request_hex, "14FFFFFF");
