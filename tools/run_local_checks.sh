@@ -98,6 +98,19 @@ start_service() {
     return 1
 }
 
+stop_front_for_negative() {
+    if ! sudo test -s "$FRONT_PID_FILE"; then
+        printf 'FRONT PID file is missing; cannot establish a controlled outage\n' >&2
+        return 1
+    fi
+    service_pid="$(sudo cat "$FRONT_PID_FILE")"
+    if ! sudo kill -0 "$service_pid" 2>/dev/null; then
+        printf 'FRONT process was already stopped; negative case is not controlled\n' >&2
+        return 1
+    fi
+    stop_service FRONT "$FRONT_PID_FILE"
+}
+
 stop_service() {
     name="$1"
     pidfile="$2"
@@ -306,6 +319,8 @@ if [[ "$missing" -ne 0 ]]; then
     exit 2
 fi
 record_pass "Linux and required command preflight (including isotpsend/isotprecv)"
+run_check "Bash syntax for local-check harness" bash -n "$SCRIPT_DIR/run_local_checks.sh" || exit 1
+run_check "Python syntax for independent DoIP client" python3 -c 'import ast,pathlib,sys; ast.parse(pathlib.Path(sys.argv[1]).read_text()); print("Python AST parse passed")' "$SCRIPT_DIR/doip_independent_client.py" || exit 1
 if ! sudo -v; then record_fail "sudo authorization"; exit 2; fi
 record_pass "sudo authorization"
 if sudo test -e "$OWNER_MARKER"; then
@@ -367,7 +382,7 @@ if [[ "$SERVICES_READY" -eq 1 ]]; then
     run_check "SOVD clear-faults execution reaches completed" submit_sovd_execution completed || true
     run_check "ECM DTC is gone after successful SOVD clear" check_faults_empty || true
 
-    if run_check "stop FRONT service for controlled negative case" stop_service FRONT "$FRONT_PID_FILE"; then
+    if run_check "stop FRONT service for controlled negative case" stop_front_for_negative; then
         run_check "failed SOVD clear is recorded with status=failed" submit_sovd_execution failed || true
     else
         record_skip "negative SOVD execution (FRONT service could not be stopped)"
