@@ -215,8 +215,10 @@ mod tests {
         let first_handle = dispatcher.clone();
 
         let first = thread::spawn(move || {
-            first_handle
-                .process_blocking_with_timeout(vec![0x14, 0xFF, 0xFF, 0xFF], Duration::from_secs(30))
+            first_handle.process_blocking_with_timeout(
+                vec![0x14, 0xFF, 0xFF, 0xFF],
+                Duration::from_secs(30),
+            )
         });
 
         started.recv_timeout(Duration::from_secs(1)).unwrap();
