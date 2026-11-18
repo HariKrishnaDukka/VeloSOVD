@@ -21,6 +21,7 @@ use axum::{
     Json, Router,
     extract::{Path, Query, State},
     http::{StatusCode, header},
+    response::IntoResponse,
     routing::{get, post},
 };
 use diagnostic_common::{DiagnosticFault, DiagnosticValue, EcuInfo, OperationResult};
@@ -112,11 +113,217 @@ struct SovdStartExecutionRequest {
     proximity_response: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct SovdGenericError {
     error_code: String,
-    vendor_code: String,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vendor_code: Option<String>,
+}
+
+#[derive(Debug)]
+struct SovdApiError {
+    status: StatusCode,
+    error: SovdGenericError,
+}
+
+impl IntoResponse for SovdApiError {
+    fn into_response(self) -> axum::response::Response {
+        (self.status, Json(self.error)).into_response()
+    }
+}
+
+#[derive(Debug)]
+enum ClearFaultError {
+    NegativeResponse(u8),
+    EmptyResponse,
+    TruncatedResponse,
+    UnexpectedResponseLength(usize),
+    WrongResponseSid(u8),
+    MalformedResponse(String),
+    Timeout,
+    QueueFull,
+    DispatcherUnavailable,
+    ResponseUnavailable,
+    Transport(String),
+    Upstream { status: StatusCode, error: SovdGenericError },
+}
+
+impl ClearFaultError {
+    fn generic_error(&self) -> SovdGenericError {
+        let (error_code, message, vendor_code) = match self {
+            Self::NegativeResponse(nrc) => (
+                "uds-negative-response",
+                format!("ECU rejected ClearDiagnosticInformation with NRC 0x{nrc:02X}"),
+                Some(format!("UDS_NRC_0x{nrc:02X}")),
+            ),
+            Self::EmptyResponse => (
+                "uds-empty-response",
+                "ECU returned no UDS response for ClearDiagnosticInformation".to_string(),
+                None,
+            ),
+            Self::TruncatedResponse => (
+                "uds-truncated-response",
+                "ECU returned a truncated UDS negative response".to_string(),
+                None,
+            ),
+            Self::UnexpectedResponseLength(length) => (
+                "uds-unexpected-response-length",
+                format!("Expected exactly one UDS response byte 0x54, received {length} bytes"),
+                None,
+            ),
+            Self::WrongResponseSid(sid) => (
+                "uds-wrong-response-sid",
+                format!("Expected positive response SID 0x54, received 0x{sid:02X}"),
+                None,
+            ),
+            Self::MalformedResponse(detail) => (
+                "uds-malformed-response",
+                format!("Zonal service returned an invalid UDS response: {detail}"),
+                None,
+            ),
+            Self::Timeout => (
+                "uds-timeout",
+                "Timed out waiting for the ECU UDS clear response".to_string(),
+                Some("UDS_RESPONSE_TIMEOUT".to_string()),
+            ),
+            Self::QueueFull => (
+                "uds-queue-full",
+                "The ECU UDS request queue is full".to_string(),
+                Some("UDS_QUEUE_FULL".to_string()),
+            ),
+            Self::DispatcherUnavailable => (
+                "uds-dispatcher-unavailable",
+                "The ECU UDS dispatcher is unavailable".to_string(),
+                Some("UDS_ACTOR_UNAVAILABLE".to_string()),
+            ),
+            Self::ResponseUnavailable => (
+                "uds-response-unavailable",
+                "The ECU UDS response channel closed before a response was received".to_string(),
+                Some("UDS_RESPONSE_UNAVAILABLE".to_string()),
+            ),
+            Self::Transport(detail) => (
+                "uds-transport-error",
+                format!("Could not communicate with the zonal ECU service: {detail}"),
+                None,
+            ),
+            Self::Upstream { error, .. } => return error.clone(),
+        };
+
+        SovdGenericError {
+            error_code: error_code.to_string(),
+            message,
+            vendor_code,
+        }
+    }
+
+    fn http_status(&self) -> StatusCode {
+        match self {
+            Self::Timeout => StatusCode::GATEWAY_TIMEOUT,
+            Self::QueueFull | Self::DispatcherUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Upstream { status, .. } => *status,
+            _ => StatusCode::BAD_GATEWAY,
+        }
+    }
+
+    fn execution_message(&self) -> String {
+        serde_json::to_string(&self.generic_error())
+            .unwrap_or_else(|_| "operation-failed: Clear-fault operation failed".to_string())
+    }
+
+    fn display_message(&self) -> String {
+        self.generic_error().message
+    }
+}
+
+impl From<ClearFaultError> for SovdApiError {
+    fn from(error: ClearFaultError) -> Self {
+        Self {
+            status: error.http_status(),
+            error: error.generic_error(),
+        }
+    }
+}
+
+fn decode_uds_response_hex(input: &str) -> Result<Vec<u8>, ClearFaultError> {
+    if input.is_empty() {
+        return Err(ClearFaultError::EmptyResponse);
+    }
+    if !input.len().is_multiple_of(2) {
+        return Err(ClearFaultError::MalformedResponse(
+            "response_hex has an odd number of characters".to_string(),
+        ));
+    }
+
+    let mut bytes = Vec::with_capacity(input.len() / 2);
+    for pair in input.as_bytes().chunks_exact(2) {
+        let pair = std::str::from_utf8(pair)
+            .map_err(|error| ClearFaultError::MalformedResponse(error.to_string()))?;
+        let byte = u8::from_str_radix(pair, 16)
+            .map_err(|error| ClearFaultError::MalformedResponse(error.to_string()))?;
+        bytes.push(byte);
+    }
+    Ok(bytes)
+}
+
+fn validate_clear_fault_response(response_hex: Option<&str>) -> Result<(), ClearFaultError> {
+    let response_hex = response_hex.ok_or(ClearFaultError::EmptyResponse)?;
+    let bytes = decode_uds_response_hex(response_hex)?;
+
+    if bytes.as_slice() == [0x54] {
+        return Ok(());
+    }
+    if bytes.len() == 2 && bytes[0] == 0x7F && bytes[1] == 0x14 {
+        return Err(ClearFaultError::TruncatedResponse);
+    }
+    if bytes.len() == 3 && bytes[0] == 0x7F && bytes[1] == 0x14 {
+        return Err(ClearFaultError::NegativeResponse(bytes[2]));
+    }
+    if bytes.len() >= 2 && bytes[0] == 0x7F && bytes[1] != 0x14 {
+        return Err(ClearFaultError::WrongResponseSid(bytes[1]));
+    }
+    if bytes.len() == 1 {
+        return Err(ClearFaultError::WrongResponseSid(bytes[0]));
+    }
+    Err(ClearFaultError::UnexpectedResponseLength(bytes.len()))
+}
+
+async fn invoke_clear_faults(client: &Client, url: String) -> Result<(), ClearFaultError> {
+    let response = client.post(url).send().await.map_err(|error| {
+        if error.is_timeout() {
+            ClearFaultError::Timeout
+        } else {
+            ClearFaultError::Transport(error.to_string())
+        }
+    })?;
+
+    if !response.status().is_success() {
+        let status = StatusCode::from_u16(response.status().as_u16())
+            .unwrap_or(StatusCode::BAD_GATEWAY);
+        if let Ok(error) = response.json::<SovdGenericError>().await {
+            return Err(ClearFaultError::Upstream { status, error });
+        }
+        return Err(match status {
+            StatusCode::GATEWAY_TIMEOUT => ClearFaultError::Timeout,
+            StatusCode::SERVICE_UNAVAILABLE => ClearFaultError::QueueFull,
+            _ => ClearFaultError::Transport(format!("zonal HTTP status {}", status.as_u16())),
+        });
+    }
+
+    let result = response
+        .json::<UdsDiagnosticResponse>()
+        .await
+        .map_err(|error| ClearFaultError::MalformedResponse(error.to_string()))?;
+
+    validate_clear_fault_response(result.response_hex.as_deref())
+}
+
+fn generic_error_from_execution_message(message: &str) -> SovdGenericError {
+    serde_json::from_str::<SovdGenericError>(message).unwrap_or_else(|_| SovdGenericError {
+        error_code: "operation-failed".to_string(),
+        message: message.to_string(),
+        vendor_code: None,
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -496,20 +703,38 @@ async fn fault_by_code(
 async fn delete_faults(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<StatusCode, StatusCode> {
-    let url = resolve_ecu_url(&state, &id)?;
+) -> Result<StatusCode, SovdApiError> {
+    let url = resolve_ecu_url(&state, &id).map_err(|status| SovdApiError {
+        status,
+        error: SovdGenericError {
+            error_code: "not-found".to_string(),
+            message: format!("ECU '{id}' is not configured"),
+            vendor_code: None,
+        },
+    })?;
 
     let response = state
         .client
         .delete(format!("{url}/diagnostics/faults"))
         .send()
         .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+        .map_err(|error| {
+            SovdApiError::from(ClearFaultError::Transport(error.to_string()))
+        })?;
 
     let status = response.status();
 
     if !status.is_success() {
-        return Err(StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY));
+        let status = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let error = response
+            .json::<SovdGenericError>()
+            .await
+            .unwrap_or_else(|_| SovdGenericError {
+                error_code: "uds-transport-error".to_string(),
+                message: format!("Zonal fault collection DELETE returned HTTP {}", status.as_u16()),
+                vendor_code: None,
+            });
+        return Err(SovdApiError { status, error });
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -540,28 +765,28 @@ async fn delete_fault(
 async fn clear_faults(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<OperationResult>, StatusCode> {
-    let url = resolve_ecu_url(&state, &id)?;
+) -> Result<Json<OperationResult>, SovdApiError> {
+    let url = resolve_ecu_url(&state, &id).map_err(|status| SovdApiError {
+        status,
+        error: SovdGenericError {
+            error_code: "not-found".to_string(),
+            message: format!("ECU '{id}' is not configured"),
+            vendor_code: None,
+        },
+    })?;
 
-    let response = state
-        .client
-        .post(format!("{url}/diagnostics/operations/clear-faults"))
-        .send()
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    invoke_clear_faults(
+        &state.client,
+        format!("{url}/diagnostics/operations/clear-faults"),
+    )
+    .await
+    .map_err(SovdApiError::from)?;
 
-    if !response.status().is_success() {
-        return Err(
-            StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY)
-        );
-    }
-
-    let result = response
-        .json::<OperationResult>()
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
-
-    Ok(Json(result))
+    Ok(Json(OperationResult {
+        operation: "clear_faults".to_string(),
+        success: true,
+        message: format!("{id} fault memory cleared"),
+    }))
 }
 
 async fn run_clear_faults(
@@ -575,24 +800,18 @@ async fn run_clear_faults(
 
     let url = resolve_ecu_url(state, &id)?;
 
-    // Do not hold the execution-history lock during network I/O.
-    let response = state
-        .client
-        .post(format!("{url}/diagnostics/operations/clear-faults"))
-        .send()
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    // Do not hold the execution-history lock during network I/O. Once the
+    // operation is admitted, record both positive and negative outcomes.
+    let result = invoke_clear_faults(
+        &state.client,
+        format!("{url}/diagnostics/operations/clear-faults"),
+    )
+    .await;
 
-    if !response.status().is_success() {
-        return Err(
-            StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY)
-        );
-    }
-
-    let result = response
-        .json::<OperationResult>()
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    let (success, message) = match result {
+        Ok(()) => (true, format!("{id} fault memory cleared")),
+        Err(error) => (false, error.display_message()),
+    };
 
     let sequence = state.next_execution_id.fetch_add(1, Ordering::Relaxed);
 
@@ -602,13 +821,13 @@ async fn run_clear_faults(
         execution_id: format!("exec-{sequence:016}"),
         ecu_id: id,
         operation: operation_id.to_string(),
-        status: if result.success {
+        status: if success {
             "completed".to_string()
         } else {
             "failed".to_string()
         },
-        success: result.success,
-        message: result.message,
+        success,
+        message,
         created_at_unix_ms: unix_time_ms(),
     };
 
@@ -674,29 +893,14 @@ impl OperationExecutor for ClearFaultsExecutor {
                 zone.zonal_ip, self.zonal_http_port, ecu.id
             );
 
-            let response = self.client.post(url).send().await.map_err(|error| {
-                ExecutionError::Failed(format!("Zonal request failed: {error}"))
-            })?;
+            invoke_clear_faults(&self.client, url)
+                .await
+                .map_err(|error| ExecutionError::Failed(error.execution_message()))?;
 
-            if !response.status().is_success() {
-                return Err(ExecutionError::Failed(format!(
-                    "Zonal service returned HTTP {}",
-                    response.status().as_u16()
-                )));
-            }
-
-            let result = response.json::<OperationResult>().await.map_err(|error| {
-                ExecutionError::Failed(format!("Invalid zonal response: {error}"))
-            })?;
-
-            if result.success {
-                Ok(ExecutionOutput {
-                    success: true,
-                    message: result.message,
-                })
-            } else {
-                Err(ExecutionError::Failed(result.message))
-            }
+            Ok(ExecutionOutput {
+                success: true,
+                message: format!("{} fault memory cleared", context.ecu_id),
+            })
         })
     }
 }
@@ -901,14 +1105,12 @@ async fn sovd_get_operation_execution(
     let error = if execution.state == ExecutionState::Failed {
         Some(vec![SovdExecutionError {
             path: "/".to_string(),
-            error: SovdGenericError {
-                error_code: "VENDOR_SPECIFIC".to_string(),
-                vendor_code: "SOVD_DEMO_EXECUTION_FAILED".to_string(),
-                message: execution
+            error: generic_error_from_execution_message(
+                execution
                     .message
-                    .clone()
-                    .unwrap_or_else(|| "Operation execution failed".to_string()),
-            },
+                    .as_deref()
+                    .unwrap_or("Operation execution failed"),
+            ),
         }])
     } else {
         None
@@ -1607,11 +1809,11 @@ mod payload_forwarding_integration_tests {
     async fn sovd_post_executes_operation_and_records_execution() {
         use axum::routing::post;
 
-        async fn mock_clear_faults() -> Json<OperationResult> {
-            Json(OperationResult {
-                operation: "clear_faults".to_string(),
-                success: true,
-                message: "ECM fault memory cleared".to_string(),
+        async fn mock_clear_faults() -> Json<UdsDiagnosticResponse> {
+            Json(UdsDiagnosticResponse {
+                ecu_id: "ECM".to_string(),
+                request_hex: "14FFFFFF".to_string(),
+                response_hex: Some("54".to_string()),
             })
         }
 
@@ -2268,6 +2470,175 @@ mod payload_forwarding_integration_tests {
             .expect("Unknown ECU deletion must complete");
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        central_task.abort();
+        mock_task.abort();
+    }
+}
+
+#[cfg(test)]
+mod clear_fault_response_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_only_exact_one_byte_positive_response() {
+        assert_eq!(validate_clear_fault_response(Some("54")), Ok(()));
+    }
+
+    #[test]
+    fn maps_negative_response_code() {
+        assert!(matches!(
+            validate_clear_fault_response(Some("7F1431")),
+            Err(ClearFaultError::NegativeResponse(0x31))
+        ));
+    }
+
+    #[test]
+    fn distinguishes_empty_truncated_wrong_sid_and_long_responses() {
+        assert!(matches!(
+            validate_clear_fault_response(None),
+            Err(ClearFaultError::EmptyResponse)
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("")),
+            Err(ClearFaultError::EmptyResponse)
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("7F14")),
+            Err(ClearFaultError::TruncatedResponse)
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("55")),
+            Err(ClearFaultError::WrongResponseSid(0x55))
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("7F2231")),
+            Err(ClearFaultError::WrongResponseSid(0x22))
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("5400")),
+            Err(ClearFaultError::UnexpectedResponseLength(2))
+        ));
+    }
+
+    #[test]
+    fn rejects_malformed_response_hex() {
+        assert!(matches!(
+            validate_clear_fault_response(Some("5Z")),
+            Err(ClearFaultError::MalformedResponse(_))
+        ));
+        assert!(matches!(
+            validate_clear_fault_response(Some("5")),
+            Err(ClearFaultError::MalformedResponse(_))
+        ));
+    }
+
+    #[test]
+    fn generic_error_json_uses_kebab_case_and_optional_vendor_code() {
+        let negative = ClearFaultError::NegativeResponse(0x31).generic_error();
+        let negative_json = serde_json::to_value(negative).unwrap();
+        assert_eq!(negative_json["error_code"], "uds-negative-response");
+        assert_eq!(negative_json["vendor_code"], "UDS_NRC_0x31");
+        assert!(negative_json["message"].as_str().is_some());
+
+        let empty = ClearFaultError::EmptyResponse.generic_error();
+        let empty_json = serde_json::to_value(empty).unwrap();
+        assert_eq!(empty_json["error_code"], "uds-empty-response");
+        assert!(empty_json.get("vendor_code").is_none());
+    }
+}
+
+#[cfg(test)]
+mod clear_fault_history_tests {
+    use super::*;
+    use axum::routing::post;
+    use serde_json::Value;
+    use std::path::PathBuf;
+
+    async fn mock_negative_clear() -> Json<UdsDiagnosticResponse> {
+        Json(UdsDiagnosticResponse {
+            ecu_id: "ECM".to_string(),
+            request_hex: "14FFFFFF".to_string(),
+            response_hex: Some("7F1431".to_string()),
+        })
+    }
+
+    #[tokio::test]
+    async fn negative_uds_response_is_recorded_as_failed_execution() {
+        let topology_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../platform/config/vehicle-topology.toml");
+        let mut topology = VehicleTopology::load(&topology_path).expect("Test topology must load");
+
+        for zone in &mut topology.zones {
+            zone.zonal_ip = "127.0.0.1".to_string();
+        }
+
+        let mock_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Mock zonal listener must bind");
+        let mock_port = mock_listener.local_addr().unwrap().port();
+        let mock_app = Router::new().route(
+            "/ecus/ECM/diagnostics/operations/clear-faults",
+            post(mock_negative_clear),
+        );
+        let mock_task = tokio::spawn(async move {
+            axum::serve(mock_listener, mock_app)
+                .await
+                .expect("Mock zonal server failed");
+        });
+
+        let state = AppState {
+            client: Client::builder()
+                .timeout(Duration::from_secs(3))
+                .build()
+                .expect("HTTP client must initialize"),
+            topology,
+            zonal_http_port: mock_port,
+            next_execution_id: Arc::new(AtomicU64::new(1)),
+            executions: Arc::new(Mutex::new(VecDeque::with_capacity(
+                EXECUTION_HISTORY_CAPACITY,
+            ))),
+            execution_manager: Arc::new(OnceCell::new()),
+        };
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Central listener must bind");
+        let address = listener.local_addr().unwrap();
+        let central_task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("Central server failed");
+        });
+
+        let client = Client::new();
+        let base = format!("http://{address}");
+        let response = client
+            .post(format!(
+                "{base}/api/ecus/ECM/operations/clear-faults/executions"
+            ))
+            .send()
+            .await
+            .expect("Clear execution request must complete");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let execution: Value = response.json().await.unwrap();
+        assert_eq!(execution["success"], false);
+        assert_eq!(execution["status"], "failed");
+        assert!(execution["message"].as_str().unwrap().contains("NRC 0x31"));
+
+        let history_response = client
+            .get(format!(
+                "{base}/api/ecus/ECM/operations/clear-faults/executions"
+            ))
+            .send()
+            .await
+            .expect("Execution history request must complete");
+        assert_eq!(history_response.status(), StatusCode::OK);
+        let history: Value = history_response.json().await.unwrap();
+        assert_eq!(history.as_array().unwrap().len(), 1);
+        assert_eq!(history[0]["success"], false);
+        assert_eq!(history[0]["status"], "failed");
 
         central_task.abort();
         mock_task.abort();

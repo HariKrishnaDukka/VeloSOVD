@@ -14,9 +14,10 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     http::StatusCode,
+    response::IntoResponse,
     routing::{get, post},
 };
-use diagnostic_common::{DiagnosticFault, DiagnosticValue, EcuInfo, OperationResult};
+use diagnostic_common::{DiagnosticFault, DiagnosticValue, EcuInfo};
 use doip_gateway::{DiagnosticRouter, RouterError, UdsDispatchFailure, UdsRequestHandler};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, watch};
@@ -49,6 +50,73 @@ struct UdsDiagnosticResponse {
     ecu_id: String,
     request_hex: String,
     response_hex: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct GenericErrorBody {
+    error_code: String,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vendor_code: Option<String>,
+}
+
+#[derive(Debug)]
+struct UdsApiError {
+    status: StatusCode,
+    body: GenericErrorBody,
+}
+
+impl UdsApiError {
+    fn new(
+        status: StatusCode,
+        error_code: &str,
+        message: impl Into<String>,
+        vendor_code: Option<&str>,
+    ) -> Self {
+        Self {
+            status,
+            body: GenericErrorBody {
+                error_code: error_code.to_string(),
+                message: message.into(),
+                vendor_code: vendor_code.map(str::to_string),
+            },
+        }
+    }
+
+    fn from_dispatch(error: UdsDispatchError) -> Self {
+        match error {
+            UdsDispatchError::QueueFull => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "queue-full",
+                "The ECU diagnostic request queue is full",
+                Some("UDS_QUEUE_FULL"),
+            ),
+            UdsDispatchError::ActorUnavailable => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "dispatcher-unavailable",
+                "The ECU UDS dispatcher is unavailable",
+                Some("UDS_ACTOR_UNAVAILABLE"),
+            ),
+            UdsDispatchError::ResponseUnavailable => Self::new(
+                StatusCode::BAD_GATEWAY,
+                "response-unavailable",
+                "The ECU UDS response channel closed before a response was received",
+                Some("UDS_RESPONSE_UNAVAILABLE"),
+            ),
+            UdsDispatchError::ResponseTimeout => Self::new(
+                StatusCode::GATEWAY_TIMEOUT,
+                "timeout",
+                "The ECU UDS response deadline expired",
+                Some("UDS_RESPONSE_TIMEOUT"),
+            ),
+        }
+    }
+}
+
+impl IntoResponse for UdsApiError {
+    fn into_response(self) -> axum::response::Response {
+        (self.status, Json(self.body)).into_response()
+    }
 }
 
 fn decode_hex_payload(input: &str) -> Result<Vec<u8>, StatusCode> {
@@ -142,37 +210,68 @@ fn build_doip_router(registry: &DoipEcuRegistry) -> Result<DiagnosticRouter, Rou
     Ok(router)
 }
 
-async fn diagnostic_request(
-    State(dispatchers): State<DiagnosticDispatcherRegistry>,
-    Path(id): Path<String>,
-    Json(request): Json<UdsDiagnosticRequest>,
-) -> Result<Json<UdsDiagnosticResponse>, StatusCode> {
-    let payload = decode_hex_payload(&request.payload_hex)?;
-    if payload.len() > 4096 {
-        return Err(StatusCode::PAYLOAD_TOO_LARGE);
-    }
-
-    let dispatcher = dispatchers.get(&id).cloned().ok_or(StatusCode::NOT_FOUND)?;
+async fn dispatch_uds_payload(
+    dispatchers: &DiagnosticDispatcherRegistry,
+    ecu_id: String,
+    payload: Vec<u8>,
+) -> Result<UdsDiagnosticResponse, UdsApiError> {
+    let dispatcher = dispatchers.get(&ecu_id).cloned().ok_or_else(|| {
+        UdsApiError::new(
+            StatusCode::NOT_FOUND,
+            "not-found",
+            format!("ECU '{ecu_id}' is not configured in this zone"),
+            None,
+        )
+    })?;
     let request_hex = encode_hex_payload(&payload);
 
     // The dispatcher uses a blocking standard channel. Keep that wait off
     // the Tokio executor so other ECU HTTP requests remain schedulable.
     let result = tokio::task::spawn_blocking(move || dispatcher.process_blocking(payload))
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|error| {
+            UdsApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal-error",
+                format!("UDS dispatcher task failed: {error}"),
+                None,
+            )
+        })?;
 
-    let response = result.map_err(|error| match error {
-        UdsDispatchError::QueueFull => StatusCode::SERVICE_UNAVAILABLE,
-        UdsDispatchError::ActorUnavailable => StatusCode::SERVICE_UNAVAILABLE,
-        UdsDispatchError::ResponseUnavailable => StatusCode::BAD_GATEWAY,
-        UdsDispatchError::ResponseTimeout => StatusCode::GATEWAY_TIMEOUT,
-    })?;
+    let response = result.map_err(UdsApiError::from_dispatch)?;
 
-    Ok(Json(UdsDiagnosticResponse {
-        ecu_id: id,
+    Ok(UdsDiagnosticResponse {
+        ecu_id,
         request_hex,
         response_hex: response.as_deref().map(encode_hex_payload),
-    }))
+    })
+}
+
+async fn diagnostic_request(
+    State(dispatchers): State<DiagnosticDispatcherRegistry>,
+    Path(id): Path<String>,
+    Json(request): Json<UdsDiagnosticRequest>,
+) -> Result<Json<UdsDiagnosticResponse>, UdsApiError> {
+    let payload = decode_hex_payload(&request.payload_hex).map_err(|status| {
+        UdsApiError::new(
+            status,
+            "invalid-request",
+            "The UDS payload must be non-empty, even-length hexadecimal data",
+            None,
+        )
+    })?;
+    if payload.len() > 4096 {
+        return Err(UdsApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload-too-large",
+            "The UDS payload exceeds the configured 4096-byte limit",
+            None,
+        ));
+    }
+
+    dispatch_uds_payload(&dispatchers, id, payload)
+        .await
+        .map(Json)
 }
 
 async fn list_ecus(State(registry): State<EcuRegistry>) -> Json<Vec<EcuInfo>> {
@@ -259,20 +358,33 @@ async fn read_fault(
 }
 
 async fn delete_faults(
-    State(registry): State<EcuRegistry>,
+    State(dispatchers): State<DiagnosticDispatcherRegistry>,
     Path(id): Path<String>,
-) -> Result<StatusCode, StatusCode> {
-    let ecus = registry.read().await;
-    let ecu = ecus.get(&id).ok_or(StatusCode::NOT_FOUND)?;
+) -> Result<StatusCode, UdsApiError> {
+    let response = dispatch_uds_payload(
+        &dispatchers,
+        id,
+        vec![0x14, 0xFF, 0xFF, 0xFF],
+    )
+    .await?;
 
-    let mut dtcs = ecu
-        .dtcs
-        .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    dtcs.clear();
-
-    Ok(StatusCode::NO_CONTENT)
+    // Collection deletion is successful only for the exact UDS positive
+    // response. A negative, suppressed, or malformed response is a failure.
+    match response.response_hex.as_deref() {
+        Some("54") => Ok(StatusCode::NO_CONTENT),
+        None => Err(UdsApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "empty-response",
+            "The ECU suppressed the UDS clear response",
+            None,
+        )),
+        Some(_) => Err(UdsApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "unexpected-response",
+            "The ECU did not return exactly the UDS positive response 54",
+            None,
+        )),
+    }
 }
 
 async fn delete_fault(
@@ -298,23 +410,18 @@ async fn delete_fault(
 }
 
 async fn clear_faults(
-    State(registry): State<EcuRegistry>,
+    State(dispatchers): State<DiagnosticDispatcherRegistry>,
     Path(id): Path<String>,
-) -> Result<Json<OperationResult>, StatusCode> {
-    let mut ecus = registry.write().await;
-    let ecu = ecus.get_mut(&id).ok_or(StatusCode::NOT_FOUND)?;
-
-    let mut dtcs = ecu
-        .dtcs
-        .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    dtcs.clear();
-
-    Ok(Json(OperationResult {
-        operation: "clear_faults".to_string(),
-        success: true,
-        message: format!("{} fault memory cleared", id),
-    }))
+) -> Result<Json<UdsDiagnosticResponse>, UdsApiError> {
+    // Return the raw UDS response in hexadecimal form. The central SOVD
+    // service is responsible for accepting exactly one byte: 0x54.
+    dispatch_uds_payload(
+        &dispatchers,
+        id,
+        vec![0x14, 0xFF, 0xFF, 0xFF],
+    )
+    .await
+    .map(Json)
 }
 
 fn make_ecu(
@@ -578,6 +685,14 @@ async fn main() {
 
     let diagnostic_router = Router::new()
         .route("/ecus/{id}/diagnostics/requests", post(diagnostic_request))
+        .route(
+            "/ecus/{id}/diagnostics/faults",
+            delete(delete_faults),
+        )
+        .route(
+            "/ecus/{id}/diagnostics/operations/clear-faults",
+            post(clear_faults),
+        )
         .with_state(diagnostic_dispatcher_registry);
 
     let app = Router::new()
@@ -586,15 +701,11 @@ async fn main() {
         .route("/ecus/{id}/data/vehicle-speed", get(vehicle_speed))
         .route(
             "/ecus/{id}/diagnostics/faults",
-            get(read_faults).delete(delete_faults),
+            get(read_faults),
         )
         .route(
             "/ecus/{id}/diagnostics/faults/{fault_code}",
             get(read_fault).delete(delete_fault),
-        )
-        .route(
-            "/ecus/{id}/diagnostics/operations/clear-faults",
-            post(clear_faults),
         )
         .merge(diagnostic_router)
         .with_state(registry);
@@ -755,6 +866,17 @@ mod dtc_shared_state_integration_tests {
         );
 
         Arc::new(RwLock::new(ecus))
+    }
+
+    fn test_dispatcher(
+        dtcs: DtcStore,
+    ) -> (DiagnosticDispatcherRegistry, std::thread::JoinHandle<()>) {
+        let server = make_uds_server("ECM", dtcs);
+        let (dispatcher, actor) =
+            spawn_uds_dispatcher("ECM".to_string(), server, DEFAULT_UDS_QUEUE_CAPACITY);
+        let mut dispatchers = HashMap::new();
+        dispatchers.insert("ECM".to_string(), dispatcher);
+        (Arc::new(dispatchers), actor)
     }
 
     #[tokio::test]
@@ -940,31 +1062,29 @@ mod dtc_shared_state_integration_tests {
     }
 
     #[tokio::test]
-    async fn http_delete_fault_collection_clears_shared_dtc_store() {
+    async fn http_delete_fault_collection_clears_shared_dtc_store_through_uds() {
         let registry = test_registry();
 
         let dtcs = {
             let ecus = registry.read().await;
             ecus.get("ECM").unwrap().dtcs.clone()
         };
+        let (dispatchers, actor) = test_dispatcher(dtcs.clone());
 
-        let mut uds = make_uds_server("ECM", dtcs);
-
-        let response = delete_faults(State(registry.clone()), Path("ECM".to_string()))
+        let response = delete_faults(State(dispatchers.clone()), Path("ECM".to_string()))
             .await
-            .expect("Fault collection must be deleted");
+            .expect("Fault collection must be deleted through UDS");
 
         assert_eq!(response, StatusCode::NO_CONTENT);
+        assert!(dtcs.lock().unwrap().is_empty());
 
-        let http_response = read_faults(State(registry.clone()), Path("ECM".to_string()))
+        let http_response = read_faults(State(registry), Path("ECM".to_string()))
             .await
             .unwrap();
-
         assert!(http_response.0.is_empty());
 
-        let uds_response = uds.process_request(&[0x19, 0x02, 0x08]).unwrap();
-
-        assert_eq!(uds_response, vec![0x59, 0x02, 0xFF]);
+        drop(dispatchers);
+        actor.join().unwrap();
     }
 
     #[tokio::test]
@@ -987,31 +1107,52 @@ mod dtc_shared_state_integration_tests {
 
         assert!(matches!(unknown_ecu, Err(StatusCode::NOT_FOUND)));
 
-        let unknown_collection = delete_faults(State(registry), Path("UNKNOWN".to_string())).await;
+        let dtcs = {
+            let ecus = registry.read().await;
+            ecus.get("ECM").unwrap().dtcs.clone()
+        };
+        let (dispatchers, actor) = test_dispatcher(dtcs);
+        let unknown_collection =
+            delete_faults(State(dispatchers.clone()), Path("UNKNOWN".to_string())).await;
 
-        assert!(matches!(unknown_collection, Err(StatusCode::NOT_FOUND)));
+        assert!(matches!(
+            unknown_collection,
+            Err(UdsApiError { status: StatusCode::NOT_FOUND, .. })
+        ));
+
+        drop(dispatchers);
+        actor.join().unwrap();
     }
 
     #[tokio::test]
-    async fn http_clear_is_visible_through_uds() {
+    async fn clear_endpoint_returns_raw_uds_positive_response_and_clears_shared_store() {
         let registry = test_registry();
 
         let dtcs = {
             let ecus = registry.read().await;
             ecus.get("ECM").unwrap().dtcs.clone()
         };
+        let (dispatchers, actor) = test_dispatcher(dtcs.clone());
 
-        let mut uds = make_uds_server("ECM", dtcs);
+        let clear_response = clear_faults(
+            State(dispatchers.clone()),
+            Path("ECM".to_string()),
+        )
+        .await
+        .expect("Clear endpoint must dispatch UDS service 0x14");
 
-        let clear_response = clear_faults(State(registry.clone()), Path("ECM".to_string()))
+        assert_eq!(clear_response.0.ecu_id, "ECM");
+        assert_eq!(clear_response.0.request_hex, "14FFFFFF");
+        assert_eq!(clear_response.0.response_hex.as_deref(), Some("54"));
+        assert!(dtcs.lock().unwrap().is_empty());
+
+        let http_response = read_faults(State(registry), Path("ECM".to_string()))
             .await
             .unwrap();
+        assert!(http_response.0.is_empty());
 
-        assert!(clear_response.0.success);
-
-        let uds_response = uds.process_request(&[0x19, 0x02, 0xFF]).unwrap();
-
-        assert_eq!(uds_response, vec![0x59, 0x02, 0xFF]);
+        drop(dispatchers);
+        actor.join().unwrap();
     }
 
     #[tokio::test]

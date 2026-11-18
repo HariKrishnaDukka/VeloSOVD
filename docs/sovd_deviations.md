@@ -540,3 +540,49 @@ Outstanding work includes:
 - Security, authorization and operation precondition enforcement.
 
 **Standards assessment:** Not established. The implementation and tests demonstrate project-level execution behaviour only. They do not establish ISO 17978-3 conformance or certification.
+
+## 2.6 UDS ClearDiagnosticInformation simulator behaviour
+
+**Capability:** Clear all diagnostic trouble codes through UDS service
+`0x14`, using the all-DTC group value `0xFFFFFF`.
+
+**Implementation status:** Implemented as simulator behaviour. This is not
+evidence of complete ISO 14229 conformance or physical ECU interoperability.
+
+**Defined simulator responses:**
+
+- A valid all-DTC clear request with payload `14 FF FF FF` clears the
+  simulated DTC store and returns the one-byte positive response `54`.
+  This also succeeds when the DTC store is already empty.
+- A request with an invalid length returns negative response
+  `7F 14 13` (incorrect message length or invalid format).
+- A request with an unsupported DTC group returns negative response
+  `7F 14 31` (request out of range).
+
+The NRC values `0x13` and `0x31` are explicitly recorded as current
+simulator behaviour. Their implementation does not establish that every
+physical ECU or every applicable diagnostic profile must respond identically.
+
+**Dispatch architecture:**
+
+- The zonal clear-fault POST and fault-collection DELETE submit
+  `14 FF FF FF` through the per-ECU UDS dispatcher.
+- The zonal POST preserves the raw UDS response bytes in `response_hex`.
+- The central clear-fault operation accepts success only for exactly one
+  response byte, `54`.
+- A negative, empty, suppressed, truncated or unexpected response is a
+  failure and must not be recorded as a completed operation.
+
+**Verification required:**
+
+- Clear a seeded DTC and verify the shared HTTP/UDS DTC store is empty.
+- Clear an already empty DTC store and verify `54`.
+- Verify unsupported-group NRC `0x31` and invalid-length NRC `0x13`.
+- Verify negative, missing and malformed responses are mapped to failed
+  operation executions.
+- Verify deterministic dispatcher timeout and queue-full handling at the
+  configured per-ECU capacity of 16.
+
+**Standards assessment:** Not established. The behaviour above is a
+project-defined simulator subset and must not be represented as full
+ISO 14229 or ISO 17978-3 conformance.
