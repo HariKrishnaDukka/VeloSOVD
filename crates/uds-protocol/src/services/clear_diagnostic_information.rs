@@ -48,4 +48,25 @@ mod tests {
             Some(vec![0x7F, 0x14, 0x31])
         );
     }
+
+    #[test]
+    fn clearing_empty_store_returns_positive_response() {
+        let store = new_dtc_store(Vec::new());
+
+        assert_eq!(
+            handle(&[0x14, 0xFF, 0xFF, 0xFF], &store),
+            Some(vec![0x54])
+        );
+        assert!(store.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejects_invalid_request_length_with_nrc_13() {
+        let store = new_dtc_store(Vec::new());
+
+        assert_eq!(
+            handle(&[0x14, 0xFF, 0xFF], &store),
+            Some(vec![0x7F, 0x14, 0x13])
+        );
+    }
 }
