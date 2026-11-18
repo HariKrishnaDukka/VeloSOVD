@@ -2655,6 +2655,46 @@ mod clear_fault_history_tests {
         assert_eq!(history[0]["success"], false);
         assert_eq!(history[0]["status"], "failed");
 
+        // The SOVD-facing execution adapter must expose the same failure as
+        // a generic error object with a kebab-case error_code.
+        let start = client
+            .post(format!(
+                "{base}/sovd/v1/components/ECM/operations/clear-faults/executions"
+            ))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .expect("SOVD negative-response execution must start");
+        assert_eq!(start.status(), StatusCode::ACCEPTED);
+        let start_body: Value = start.json().await.unwrap();
+        let sovd_execution_id = start_body["id"].as_str().unwrap();
+
+        let mut sovd_status = Value::Null;
+        for _ in 0..100 {
+            let response = client
+                .get(format!(
+                    "{base}/sovd/v1/components/ECM/operations/clear-faults/executions/{sovd_execution_id}"
+                ))
+                .send()
+                .await
+                .expect("SOVD execution status request must complete");
+            sovd_status = response.json().await.unwrap();
+            if sovd_status["status"] == "failed" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        assert_eq!(sovd_status["status"], "failed");
+        assert_eq!(
+            sovd_status["error"][0]["error"]["error_code"],
+            "uds-negative-response"
+        );
+        assert_eq!(
+            sovd_status["error"][0]["error"]["vendor_code"],
+            "UDS_NRC_0x31"
+        );
+
         central_task.abort();
         mock_task.abort();
     }
