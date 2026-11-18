@@ -264,6 +264,12 @@ finish() {
     trap - EXIT INT TERM
     set +e
     printf '\n[local-checks] Cleanup started\n' | tee -a "$RUN_LOG"
+    for service_log in "$RUN_DIR/front.log" "$RUN_DIR/rear.log" "$RUN_DIR/central.log"; do
+        if [[ -f "$service_log" ]]; then
+            printf '\n========== FINAL SERVICE OUTPUT: %s ==========\n' "$service_log" | tee -a "$RUN_LOG"
+            tail -n 60 "$service_log" | tee -a "$RUN_LOG"
+        fi
+    done
 
     if [[ -s "$FRONT_PID_FILE" ]]; then
         if stop_service FRONT "$FRONT_PID_FILE" >"$RUN_DIR/cleanup-front" 2>&1; then
