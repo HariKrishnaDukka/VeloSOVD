@@ -333,6 +333,11 @@ if ! sudo -v; then
     exit 2
 fi
 record_pass "sudo authorization"
+if ! run_check "load Linux CAN ISO-TP kernel protocol (can-isotp)" sudo modprobe can-isotp; then
+    record_skip "namespace, service, SOVD, DoIP and ISO-TP checks (CAN ISO-TP kernel support unavailable)"
+    record_skip "Rust formatting, Clippy and workspace tests (preflight stopped safely)"
+    exit 2
+fi
 if sudo test -e "$OWNER_MARKER"; then
     record_fail "existing network ownership marker (refusing to adopt it)"
     record_skip "network, service, SOVD, DoIP and ISO-TP checks (existing owned network)"
