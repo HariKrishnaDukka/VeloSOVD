@@ -21,6 +21,9 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Check local Linux harness shell syntax
+        run: bash -n tools/run_local_checks.sh tools/setup_sovd_network.sh
+
       - name: Install stable Rust with required components
         uses: dtolnay/rust-toolchain@stable
         with:

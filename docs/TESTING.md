@@ -169,3 +169,24 @@ The test verifies:
 This verifies that the loopback DoIP listener, routing activation, diagnostic routing, production UDS dispatcher, and VIN DID response work together in the virtual ECU implementation.
 
 **Limitations:** This is a software loopback integration test. It does not establish interoperability with a physical ECU or external DoIP tester, ISO-TP communication, vehicle-network timing behavior, or automotive standards conformance.
+
+## 10. Local Linux namespace verification harness
+
+Run the complete local check harness from any working directory:
+
+```bash
+./tools/run_local_checks.sh
+```
+
+The script:
+- Creates the three isolated SOVD network namespaces using `tools/setup_sovd_network.sh`.
+- Verifies central/front and central/rear IPv4 connectivity in both directions.
+- Verifies that `vcan-front` and `vcan-rear` exist and are administratively UP.
+- Runs workspace formatting, Clippy, and Rust tests.
+- Prints an aggregate pass/fail summary and tears down the network it created, including when a test fails or the script is interrupted.
+
+The script requires Linux, Rust/Cargo, `iproute2`, `iputils-ping`, `sudo`, and the kernel `vcan` module. It prompts for sudo authorization before setup.
+
+**Ownership and safety:** the harness refuses to adopt an existing SOVD ownership marker. The underlying setup script also refuses to adopt pre-existing namespace or host-link names. Cleanup is attempted only after this invocation successfully creates the network. Do not run it while other processes are using these namespaces.
+
+**Coverage boundary:** namespace ping and vCAN link checks validate the Linux virtual network only. The Rust tests include loopback/mock DoIP and HTTP integration tests; they do not start the full distributed ECU services and do not establish physical CAN, ISO-TP, external DoIP, or physical ECU interoperability.
