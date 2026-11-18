@@ -1,9 +1,9 @@
 use opensovd_models::{
+    JsonPointer, UriReference,
     error::{DataError, ErrorCode, ErrorDetails, GenericError},
     version::{SovdInfo, VendorInfo, VersionInfo},
-    JsonPointer, UriReference,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[test]
 fn generic_error_serializes_to_expected_sovd_shape_and_round_trips() {
@@ -137,12 +137,5 @@ fn version_info_can_carry_optional_schema() {
     };
 
     let encoded = serde_json::to_value(response).expect("serialize version info with schema");
-    assert_eq!(
-        encoded.get("schema"),
-        Some(&Value::Object(
-            [("type".to_owned(), Value::String("object".to_owned()))]
-                .into_iter()
-                .collect()
-        ))
-    );
+    assert_eq!(encoded["schema"], json!({ "type": "object" }));
 }

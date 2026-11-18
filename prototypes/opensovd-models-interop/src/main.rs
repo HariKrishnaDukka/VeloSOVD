@@ -1,7 +1,7 @@
 use opensovd_models::{
+    UriReference,
     error::{ErrorCode, GenericError},
     version::{SovdInfo, VendorInfo, VersionInfo},
-    UriReference,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
