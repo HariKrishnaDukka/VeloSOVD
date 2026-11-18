@@ -120,14 +120,31 @@ stop_service() {
     fi
     service_pid="$(sudo cat "$pidfile")"
     if sudo kill -0 "$service_pid" 2>/dev/null; then
-        sudo kill -TERM "$service_pid"
+        sudo kill -TERM "$service_pid" || return 1
+        stopped=0
         for attempt in $(seq 1 30); do
-            if ! sudo kill -0 "$service_pid" 2>/dev/null; then break; fi
+            if ! sudo kill -0 "$service_pid" 2>/dev/null; then
+                stopped=1
+                break
+            fi
+            process_state="$(sudo ps -o stat= -p "$service_pid" 2>/dev/null | awk '{print $1}')"
+            if [[ "$process_state" == Z* ]]; then
+                stopped=1
+                break
+            fi
             sleep 0.1
         done
-        if sudo kill -0 "$service_pid" 2>/dev/null; then sudo kill -KILL "$service_pid"; fi
+        if [[ "$stopped" -eq 0 ]]; then
+            sudo kill -KILL "$service_pid" || return 1
+            sleep 0.2
+            process_state="$(sudo ps -o stat= -p "$service_pid" 2>/dev/null | awk '{print $1}')"
+            if sudo kill -0 "$service_pid" 2>/dev/null && [[ "$process_state" != Z* ]]; then
+                printf '%s process %s is still alive after SIGKILL\n' "$name" "$service_pid" >&2
+                return 1
+            fi
+        fi
     fi
-    sudo rm -f "$pidfile"
+    sudo rm -f "$pidfile" || return 1
     printf '%s service stopped (PID %s)\n' "$name" "$service_pid"
     case "$name" in
         FRONT) FRONT_STARTED=0 ;;
@@ -315,7 +332,7 @@ if [[ "$(uname -s)" != "Linux" ]]; then
     exit 2
 fi
 missing=0
-for tool in cargo ip sudo ping modprobe python3 curl timeout xxd isotpsend isotprecv; do
+for tool in cargo ip sudo ping modprobe python3 curl timeout xxd isotpsend isotprecv ps; do
     if ! need_command "$tool"; then missing=1; fi
 done
 if [[ "$missing" -ne 0 ]]; then
