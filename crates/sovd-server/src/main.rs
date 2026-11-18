@@ -1809,7 +1809,15 @@ mod payload_forwarding_integration_tests {
     async fn sovd_post_executes_operation_and_records_execution() {
         use axum::routing::post;
 
-        async fn mock_clear_faults() -> Json<UdsDiagnosticResponse> {
+        type MockDtcStore = Arc<StdMutex<Vec<String>>>;
+
+        async fn mock_clear_faults(
+            State(dtcs): State<MockDtcStore>,
+        ) -> Json<UdsDiagnosticResponse> {
+            dtcs.lock()
+                .expect("Mock DTC store lock must succeed")
+                .clear();
+
             Json(UdsDiagnosticResponse {
                 ecu_id: "ECM".to_string(),
                 request_hex: "14FFFFFF".to_string(),
@@ -1835,10 +1843,13 @@ mod payload_forwarding_integration_tests {
             .expect("Mock zonal address must be available")
             .port();
 
-        let mock_app = Router::new().route(
-            "/ecus/ECM/diagnostics/operations/clear-faults",
-            post(mock_clear_faults),
-        );
+        let seeded_dtcs = Arc::new(StdMutex::new(vec!["P0128".to_string()]));
+        let mock_app = Router::new()
+            .route(
+                "/ecus/ECM/diagnostics/operations/clear-faults",
+                post(mock_clear_faults),
+            )
+            .with_state(Arc::clone(&seeded_dtcs));
 
         let mock_task = tokio::spawn(async move {
             axum::serve(mock_listener, mock_app)
@@ -1977,6 +1988,10 @@ mod payload_forwarding_integration_tests {
         assert_eq!(final_status["status"], "completed");
         assert_eq!(final_status["capability"], "execute");
         assert!(final_status.get("error").is_none());
+        assert!(
+            seeded_dtcs.lock().unwrap().is_empty(),
+            "The seeded DTC must be cleared by the accepted UDS positive response"
+        );
 
         // Unsupported operation IDs must not be forwarded.
         let response = client
