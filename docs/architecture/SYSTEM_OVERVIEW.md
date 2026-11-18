@@ -226,12 +226,15 @@ The store is protected by a mutex and shared through an `Arc`.
 The HTTP fault-read route converts the stored DTC entries into the common
 diagnostic fault response.
 
-The REST clear-faults route directly clears the shared in-memory DTC store.
-UDS service `0x14` separately clears that same store through the UDS engine.
+Both the zonal clear-fault POST endpoint and the fault-collection DELETE
+endpoint submit the UDS request `14 FF FF FF` through the ECU's existing
+per-ECU dispatcher. The dispatcher is shared with the ISO-TP, DoIP and raw
+diagnostic HTTP paths; the HTTP handlers do not mutate the DTC store directly.
 
-Important distinction: the REST operation does not currently dispatch
-a UDS `0x14` request over ISO-TP or DoIP. Both paths share state, but the
-REST handler is a direct in-memory operation.
+The zonal clear-fault POST response preserves the raw UDS response bytes in
+the `response_hex` field. The central SOVD server accepts success only when
+the response is exactly the one-byte positive response `54`. A negative,
+suppressed, empty or unexpected response is not a successful clear.
 
 Initial simulated faults:
 
@@ -332,8 +335,9 @@ reinitializes the simulated ECU state and its initial sample faults.
   inventory in `vehicle-topology.toml`.
 - Simulated speed and DTC values are not backed by physical signals.
 - DTC persistence is not implemented.
-- REST clear-faults directly accesses the shared store instead of invoking
-  UDS service `0x14` through a diagnostic transport.
+- Clear-all operations are dispatched through the per-ECU UDS actor using
+  service `0x14`; they remain simulator behaviour and do not prove physical
+  ECU or ISO-TP/DoIP interoperability.
 - DoIP currently implements only a subset of the protocol.
 - UDS session state is per ECU server, not per tester connection.
 - Diagnostic security access and production authentication are not implemented.
