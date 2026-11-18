@@ -309,34 +309,49 @@ trap 'exit 143' TERM
 log "Repository: $REPO_ROOT"
 log "Run artifacts: $RUN_DIR"
 
-if [[ "$(uname -s)" != "Linux" ]]; then record_fail "Linux host requirement"; exit 2; fi
+if [[ "$(uname -s)" != "Linux" ]]; then
+    record_fail "Linux host requirement"
+    record_skip "all build, namespace, service, SOVD, DoIP, ISO-TP and Rust checks (Linux is required)"
+    exit 2
+fi
 missing=0
 for tool in cargo ip sudo ping modprobe python3 curl timeout xxd isotpsend isotprecv; do
     if ! need_command "$tool"; then missing=1; fi
 done
 if [[ "$missing" -ne 0 ]]; then
     record_fail "required Linux, Rust, Python, curl and can-utils commands"
+    record_skip "Bash/Python syntax checks and all runtime integration checks (preflight failed)"
+    record_skip "Rust formatting, Clippy and workspace tests (preflight failed)"
     exit 2
 fi
 record_pass "Linux and required command preflight (including isotpsend/isotprecv)"
 run_check "Bash syntax for local-check harness" bash -n "$SCRIPT_DIR/run_local_checks.sh" || exit 1
 run_check "Python syntax for independent DoIP client" python3 -c 'import ast,pathlib,sys; ast.parse(pathlib.Path(sys.argv[1]).read_text()); print("Python AST parse passed")' "$SCRIPT_DIR/doip_independent_client.py" || exit 1
-if ! sudo -v; then record_fail "sudo authorization"; exit 2; fi
+if ! sudo -v; then
+    record_fail "sudo authorization"
+    record_skip "namespace, service, SOVD, DoIP, ISO-TP and Rust checks (sudo authorization failed)"
+    exit 2
+fi
 record_pass "sudo authorization"
 if sudo test -e "$OWNER_MARKER"; then
     record_fail "existing network ownership marker (refusing to adopt it)"
+    record_skip "network, service, SOVD, DoIP and ISO-TP checks (existing owned network)"
+    record_skip "Rust formatting, Clippy and workspace tests (preflight stopped safely)"
     exit 2
 fi
 for ns in "$CENTRAL_NS" "$FRONT_NS" "$REAR_NS"; do
     if sudo ip netns list | awk '{print $1}' | grep -Fxq "$ns"; then
         record_fail "pre-existing namespace $ns (refusing to adopt it)"
+        record_skip "network, service, SOVD, DoIP and ISO-TP checks (namespace collision)"
+        record_skip "Rust formatting, Clippy and workspace tests (preflight stopped safely)"
         exit 2
     fi
 done
 
 cd "$REPO_ROOT"
 if ! run_check "build central and virtual ECU services" cargo build --locked -p sovd-server -p virtual-ecu; then
-    record_skip "namespace, service and protocol checks (build prerequisite failed)"
+    record_skip "namespace, service, SOVD, DoIP and ISO-TP checks (build prerequisite failed)"
+    record_skip "Rust formatting, Clippy and workspace tests (build prerequisite failed)"
     exit 1
 fi
 
