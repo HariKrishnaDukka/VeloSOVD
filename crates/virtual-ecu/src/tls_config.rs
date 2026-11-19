@@ -51,7 +51,7 @@ pub fn load_server_config(
             .build()?;
 
     let mut server_config = ServerConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()?
+        .with_protocol_versions(&[&rustls::version::TLS13])?
         .with_client_cert_verifier(client_verifier)
         .with_single_cert(certificate_chain, private_key)?;
 
