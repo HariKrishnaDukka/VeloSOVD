@@ -1339,6 +1339,7 @@ fn build_zonal_mtls_client() -> Result<Client, Box<dyn std::error::Error + Send 
         .tls_built_in_root_certs(false)
         .add_root_certificate(ca_certificate)
         .identity(identity)
+        .min_tls_version(reqwest::tls::Version::TLS_1_3)
         .timeout(Duration::from_secs(3))
         .build()
         .map_err(Into::into)
