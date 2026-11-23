@@ -12,3 +12,6 @@ serde_json.workspace = true
 reqwest.workspace = true
 diagnostic-common = { path = "../diagnostic-common" }
 vehicle-topology = { path = "../vehicle-topology" }
+axum-server.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true

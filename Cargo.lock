@@ -990,8 +990,11 @@ name = "sovd-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "axum-server",
  "diagnostic-common",
  "reqwest",
+ "rustls",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "tokio",
