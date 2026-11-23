@@ -1,4 +1,5 @@
 pub mod execution;
+mod tls_config;
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1313,12 +1314,15 @@ fn build_router(state: AppState) -> Router {
 /// Trust is restricted to the configured CA. Central presents its
 /// client certificate when connecting to a zonal server.
 fn build_zonal_mtls_client() -> Result<Client, Box<dyn std::error::Error + Send + Sync>> {
-    let ca_path = std::env::var("SDV_TLS_CA_CERT").unwrap_or_else(|_| "pki/dev/ca.crt".to_string());
+    // Central authenticates zonal servers using the dedicated Server CA.
+    let ca_path = std::env::var("SDV_TLS_SERVER_CA_CERT")
+        .unwrap_or_else(|_| "pki/dev/server-ca/ca.crt".to_string());
 
-    let cert_path = std::env::var("SDV_TLS_CERT")
+    // Central presents its Client CA-issued identity to each zonal server.
+    let cert_path = std::env::var("SDV_TLS_CLIENT_CERT")
         .unwrap_or_else(|_| "pki/dev/central/central-client.crt".to_string());
 
-    let key_path = std::env::var("SDV_TLS_KEY")
+    let key_path = std::env::var("SDV_TLS_CLIENT_KEY")
         .unwrap_or_else(|_| "pki/dev/central/central-client.key".to_string());
 
     let ca_pem = std::fs::read(&ca_path)?;
@@ -1376,17 +1380,42 @@ async fn main() {
         state.topology.central.sovd_bind, state.topology.central.sovd_port
     );
 
+    let client_ca_path = std::env::var("SDV_TLS_CLIENT_CA_CERT")
+        .unwrap_or_else(|_| "pki/dev/client-ca/ca.crt".to_string());
+
+    let server_cert_path = std::env::var("SDV_TLS_SERVER_CERT")
+        .unwrap_or_else(|_| "pki/dev/central/central-server.crt".to_string());
+
+    let server_key_path = std::env::var("SDV_TLS_SERVER_KEY")
+        .unwrap_or_else(|_| "pki/dev/central/central-server.key".to_string());
+
+    let tls_config = tls_config::load_server_config(
+        std::path::Path::new(&client_ca_path),
+        std::path::Path::new(&server_cert_path),
+        std::path::Path::new(&server_key_path),
+    )
+    .unwrap_or_else(|error| {
+        panic!("[SOVD] Central HTTPS/mTLS configuration failed: {error}");
+    });
+
     let listener = tokio::net::TcpListener::bind(&bind_address)
         .await
         .unwrap_or_else(|error| {
             panic!("Cannot bind central SOVD server at {bind_address}: {error}")
         });
 
+    let std_listener = listener
+        .into_std()
+        .expect("Cannot convert Central TCP listener");
+
+    let tls_server = axum_server::from_tcp_rustls(std_listener, tls_config)
+        .expect("Cannot initialize Central TLS server");
+
     println!(
         "[SOVD] Vehicle: {} ({})",
         state.topology.vehicle.name, state.topology.vehicle.id
     );
-    println!("[SOVD] Listening at http://{bind_address}");
+    println!("[SOVD] Listening at https://{bind_address} (TLS 1.3, mTLS required)");
     println!("[SOVD] Configured zones: {}", state.topology.zones.len());
     println!("[SOVD] Configured ECUs: {}", state.topology.ecus.len());
     println!(
@@ -1394,9 +1423,10 @@ async fn main() {
         EXECUTION_HISTORY_CAPACITY
     );
 
-    axum::serve(listener, app)
+    tls_server
+        .serve(app.into_make_service())
         .await
-        .expect("Central SOVD server failed");
+        .expect("Central HTTPS server failed");
 }
 
 #[cfg(test)]

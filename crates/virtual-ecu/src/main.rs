@@ -575,7 +575,9 @@ async fn main() {
     // Load mandatory zonal mTLS configuration before starting transports.
     let zone_slug = selected_zone_config.id.to_ascii_lowercase();
 
-    let ca_path = std::env::var("SDV_TLS_CA_CERT").unwrap_or_else(|_| "pki/dev/ca.crt".to_string());
+    // Zonal servers authenticate Central using the dedicated Client CA.
+    let ca_path = std::env::var("SDV_TLS_CLIENT_CA_CERT")
+        .unwrap_or_else(|_| "pki/dev/client-ca/ca.crt".to_string());
 
     let default_cert = format!("pki/dev/zones/{zone_slug}/{zone_slug}-server.crt");
     let default_key = format!("pki/dev/zones/{zone_slug}/{zone_slug}-server.key");

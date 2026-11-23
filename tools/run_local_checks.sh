@@ -12,9 +12,29 @@ OWNER_MARKER="/run/sovd-demo-network/owned-by-setup_sovd_network"
 CENTRAL_NS="sdv-central-ns"
 FRONT_NS="sdv-front-ns"
 REAR_NS="sdv-rear-ns"
-CENTRAL_URL="http://127.0.0.1:8010"
+CENTRAL_URL="https://10.77.10.1:8010"
 FRONT_IP="10.77.10.2"
 REAR_IP="10.77.10.6"
+
+# Development PKI identities. Private keys remain outside Git.
+PKI_ROOT="$REPO_ROOT/pki/dev"
+SERVER_CA_CERT="$PKI_ROOT/server-ca/ca.crt"
+CLIENT_CA_CERT="$PKI_ROOT/client-ca/ca.crt"
+HARNESS_CLIENT_CERT="$PKI_ROOT/harness/harness-client.crt"
+HARNESS_CLIENT_KEY="$PKI_ROOT/harness/harness-client.key"
+UNTRUSTED_CLIENT_CERT="$PKI_ROOT/untrusted/untrusted-client.crt"
+UNTRUSTED_CLIENT_KEY="$PKI_ROOT/untrusted/untrusted-client.key"
+EXPIRED_CLIENT_CERT="$PKI_ROOT/harness/expired-client.crt"
+EXPIRED_CLIENT_KEY="$PKI_ROOT/harness/expired-client.key"
+
+CENTRAL_SERVER_CERT="$PKI_ROOT/central/central-server.crt"
+CENTRAL_SERVER_KEY="$PKI_ROOT/central/central-server.key"
+CENTRAL_CLIENT_CERT="$PKI_ROOT/central/central-client.crt"
+CENTRAL_CLIENT_KEY="$PKI_ROOT/central/central-client.key"
+FRONT_SERVER_CERT="$PKI_ROOT/zones/front/front-server.crt"
+FRONT_SERVER_KEY="$PKI_ROOT/zones/front/front-server.key"
+REAR_SERVER_CERT="$PKI_ROOT/zones/rear/rear-server.crt"
+REAR_SERVER_KEY="$PKI_ROOT/zones/rear/rear-server.key"
 RUN_DIR="$(mktemp -d /tmp/velosovd-local-checks.XXXXXX)"
 RUN_LOG="$RUN_DIR/run.log"
 FRONT_PID_FILE="$RUN_DIR/front.pid"
@@ -153,21 +173,118 @@ stop_service() {
     esac
 }
 
-wait_http() {
+# All SOVD HTTPS requests authenticate the server and present a
+# dedicated harness client certificate.
+curl_mtls() {
+    namespace="$1"
+    shift
+    sudo ip netns exec "$namespace" curl \
+        --cacert "$SERVER_CA_CERT" \
+        --cert "$HARNESS_CLIENT_CERT" \
+        --key "$HARNESS_CLIENT_KEY" \
+        "$@"
+}
+
+wait_https() {
     namespace="$1"
     url="$2"
     for attempt in $(seq 1 60); do
-        if sudo ip netns exec "$namespace" curl -fsS --max-time 2 "$url" >/dev/null; then
-            sudo ip netns exec "$namespace" curl -fsS --max-time 2 "$url"
+        if curl_mtls "$namespace" -fsS --max-time 2 "$url" >/dev/null; then
+            curl_mtls "$namespace" -fsS --max-time 2 "$url"
             return 0
         fi
         sleep 0.25
     done
-    printf 'HTTP endpoint did not become ready: %s\n' "$url" >&2
+    printf 'HTTPS/mTLS endpoint did not become ready: %s\n' "$url" >&2
     return 1
 }
 
-http_json() { sudo ip netns exec "$CENTRAL_NS" curl -fsS --max-time 8 "$1"; }
+http_json() {
+    curl_mtls "$CENTRAL_NS" -fsS --max-time 8 "$1"
+}
+
+# A TLS rejection test must fail at the transport/handshake layer.
+# Do not use curl --fail here: an HTTP error response would otherwise
+# be mistaken for successful TLS rejection.
+expect_tls_rejection() {
+    local description="$1"
+    shift
+
+    local test_name
+    local output_file
+    local curl_rc=0
+
+    test_name="${description//[^[:alnum:]_-]/_}"
+    output_file="$RUN_DIR/tls-rejection-${test_name}.log"
+
+    if sudo ip netns exec "$CENTRAL_NS" curl \
+        --verbose --no-progress-meter --output /dev/null --max-time 5 \
+        --cacert "$SERVER_CA_CERT" "$@" 2>"$output_file"; then
+        printf 'FAIL: TLS request unexpectedly succeeded: %s\n' "$description" >&2
+        return 1
+    else
+        curl_rc=$?
+    fi
+
+    case "$curl_rc" in
+        35|56|60)
+            ;;
+        *)
+            printf 'FAIL: Unexpected curl failure for %s (exit %s)\n' \
+                "$description" "$curl_rc" >&2
+            cat "$output_file" >&2
+            return 1
+            ;;
+    esac
+
+    # Require evidence of a TLS alert or certificate validation failure.
+    # A generic connection reset or receive error is insufficient.
+    if grep -Eiq \
+        'TLS alert|alert.*(certificate|required|unknown ca|bad certificate|protocol version)|certificate.*(expired|verify|problem)|SSL certificate problem' \
+        "$output_file"; then
+        printf 'PASS: TLS rejection confirmed: %s (curl exit %s)\n' \
+            "$description" "$curl_rc"
+    else
+        printf 'FAIL: No explicit TLS/certificate rejection evidence for %s (curl exit %s)\n' \
+            "$description" "$curl_rc" >&2
+        cat "$output_file" >&2
+        return 1
+    fi
+}
+check_missing_client_certificate() {
+    expect_tls_rejection "missing client certificate" \
+        "$CENTRAL_URL/api/health"
+}
+
+check_untrusted_client_certificate() {
+    expect_tls_rejection "untrusted client CA" \
+        --http1.1 \
+        --cert "$UNTRUSTED_CLIENT_CERT" \
+        --key "$UNTRUSTED_CLIENT_KEY" \
+        "$CENTRAL_URL/api/health"
+}
+
+check_expired_client_certificate() {
+    expect_tls_rejection "expired client certificate" \
+        --cert "$EXPIRED_CLIENT_CERT" \
+        --key "$EXPIRED_CLIENT_KEY" \
+        "$CENTRAL_URL/api/health"
+}
+
+check_wrong_server_identity() {
+    expect_tls_rejection "server IP does not match certificate SAN" \
+        --cert "$HARNESS_CLIENT_CERT" \
+        --key "$HARNESS_CLIENT_KEY" \
+        "https://10.77.10.5:8010/api/health"
+}
+
+check_tls12_rejected() {
+    expect_tls_rejection "TLS 1.2 is disabled" \
+        --cert "$HARNESS_CLIENT_CERT" \
+        --key "$HARNESS_CLIENT_KEY" \
+        --tls-max 1.2 \
+        "$CENTRAL_URL/api/health"
+}
 
 check_seeded_dtc() {
     body="$(http_json "$CENTRAL_URL/api/ecus/ECM/diagnostics/faults")"
@@ -193,7 +310,7 @@ print("Verified ECM fault list is empty")
 
 submit_sovd_execution() {
     expected="$1"
-    response="$(sudo ip netns exec "$CENTRAL_NS" curl -fsS --max-time 8 \
+    response="$(curl_mtls "$CENTRAL_NS" -fsS --max-time 8 \
         -X POST "$CENTRAL_URL/sovd/v1/components/ECM/operations/clear-faults/executions" \
         -H 'Content-Type: application/json' -d '{}')"
     printf 'SOVD start response:\n%s\n' "$response"
@@ -347,7 +464,7 @@ if [[ "$(uname -s)" != "Linux" ]]; then
     exit 2
 fi
 missing=0
-for tool in cargo ip sudo ping modprobe python3 curl timeout xxd isotpsend isotprecv ps; do
+for tool in cargo ip sudo ping modprobe python3 curl timeout xxd isotpsend isotprecv ps openssl; do
     if ! need_command "$tool"; then missing=1; fi
 done
 if [[ "$missing" -ne 0 ]]; then
@@ -356,7 +473,11 @@ if [[ "$missing" -ne 0 ]]; then
     record_skip "Rust formatting, Clippy and workspace tests (preflight failed)"
     exit 2
 fi
-record_pass "Linux and required command preflight (including isotpsend/isotprecv)"
+record_pass "Linux and required command preflight (including isotpsend/isotprecv and openssl)"
+
+run_check "Generate and verify isolated development PKI" \
+    bash "$SCRIPT_DIR/security/generate_dev_pki.sh" || exit 1
+
 run_check "Bash syntax for local-check harness" bash -n "$SCRIPT_DIR/run_local_checks.sh" || exit 1
 run_check "Python syntax for independent DoIP client" python3 -c 'import ast,pathlib,sys; ast.parse(pathlib.Path(sys.argv[1]).read_text()); print("Python AST parse passed")' "$SCRIPT_DIR/doip_independent_client.py" || exit 1
 if ! sudo -v; then
@@ -407,9 +528,27 @@ run_check "REAR-to-central namespace connectivity" check_ping "$REAR_NS" 10.77.1
 run_check "FRONT vcan-front interface is UP" check_vcan_up "$FRONT_NS" vcan-front || true
 run_check "REAR vcan-rear interface is UP" check_vcan_up "$REAR_NS" vcan-rear || true
 
-run_check "start FRONT virtual ECU service" start_service FRONT "$FRONT_NS" "$RUN_DIR/front.log" "$FRONT_PID_FILE" "SDV_ZONE=FRONT" "SDV_TOPOLOGY=$TOPOLOGY" "$VIRTUAL_ECU_BIN" || true
-run_check "start REAR virtual ECU service" start_service REAR "$REAR_NS" "$RUN_DIR/rear.log" "$REAR_PID_FILE" "SDV_ZONE=REAR" "SDV_TOPOLOGY=$TOPOLOGY" "$VIRTUAL_ECU_BIN" || true
-run_check "start central SOVD service" start_service CENTRAL "$CENTRAL_NS" "$RUN_DIR/central.log" "$CENTRAL_PID_FILE" "SDV_TOPOLOGY=$TOPOLOGY" "$CENTRAL_BIN" || true
+run_check "start FRONT virtual ECU service" start_service FRONT "$FRONT_NS" "$RUN_DIR/front.log" "$FRONT_PID_FILE" \
+    "SDV_ZONE=FRONT" "SDV_TOPOLOGY=$TOPOLOGY" \
+    "SDV_TLS_CLIENT_CA_CERT=$CLIENT_CA_CERT" \
+    "SDV_TLS_CERT=$FRONT_SERVER_CERT" "SDV_TLS_KEY=$FRONT_SERVER_KEY" \
+    "$VIRTUAL_ECU_BIN" || true
+
+run_check "start REAR virtual ECU service" start_service REAR "$REAR_NS" "$RUN_DIR/rear.log" "$REAR_PID_FILE" \
+    "SDV_ZONE=REAR" "SDV_TOPOLOGY=$TOPOLOGY" \
+    "SDV_TLS_CLIENT_CA_CERT=$CLIENT_CA_CERT" \
+    "SDV_TLS_CERT=$REAR_SERVER_CERT" "SDV_TLS_KEY=$REAR_SERVER_KEY" \
+    "$VIRTUAL_ECU_BIN" || true
+
+run_check "start central SOVD service" start_service CENTRAL "$CENTRAL_NS" "$RUN_DIR/central.log" "$CENTRAL_PID_FILE" \
+    "SDV_TOPOLOGY=$TOPOLOGY" \
+    "SDV_TLS_CLIENT_CA_CERT=$CLIENT_CA_CERT" \
+    "SDV_TLS_SERVER_CERT=$CENTRAL_SERVER_CERT" \
+    "SDV_TLS_SERVER_KEY=$CENTRAL_SERVER_KEY" \
+    "SDV_TLS_SERVER_CA_CERT=$SERVER_CA_CERT" \
+    "SDV_TLS_CLIENT_CERT=$CENTRAL_CLIENT_CERT" \
+    "SDV_TLS_CLIENT_KEY=$CENTRAL_CLIENT_KEY" \
+    "$CENTRAL_BIN" || true
 
 for service_log in "$RUN_DIR/front.log" "$RUN_DIR/rear.log" "$RUN_DIR/central.log"; do
     if [[ -f "$service_log" ]]; then
@@ -421,15 +560,21 @@ done
 SERVICES_READY=1
 if [[ "$FRONT_STARTED" -ne 1 || "$REAR_STARTED" -ne 1 || "$CENTRAL_STARTED" -ne 1 ]]; then SERVICES_READY=0; fi
 if [[ "$SERVICES_READY" -eq 1 ]]; then
-    run_check "FRONT zonal HTTP service ready" wait_http "$CENTRAL_NS" "http://$FRONT_IP:9001/ecus" || SERVICES_READY=0
-    run_check "REAR zonal HTTP service ready" wait_http "$CENTRAL_NS" "http://$REAR_IP:9001/ecus" || SERVICES_READY=0
-    run_check "central SOVD HTTP service ready" wait_http "$CENTRAL_NS" "$CENTRAL_URL/api/health" || SERVICES_READY=0
+    run_check "FRONT zonal HTTPS/mTLS service ready" wait_https "$CENTRAL_NS" "https://$FRONT_IP:9001/ecus" || SERVICES_READY=0
+    run_check "REAR zonal HTTPS/mTLS service ready" wait_https "$CENTRAL_NS" "https://$REAR_IP:9001/ecus" || SERVICES_READY=0
+    run_check "central SOVD HTTPS/mTLS service ready" wait_https "$CENTRAL_NS" "$CENTRAL_URL/api/health" || SERVICES_READY=0
     run_check "FRONT DoIP TCP listener available" check_tcp_port "$FRONT_IP" 13400 || SERVICES_READY=0
 else
     record_skip "service readiness checks (a service failed to start)"
 fi
 
 if [[ "$SERVICES_READY" -eq 1 ]]; then
+    run_check "TLS rejects clients without certificates" check_missing_client_certificate || true
+    run_check "TLS rejects clients signed by an untrusted CA" check_untrusted_client_certificate || true
+    run_check "TLS rejects expired client certificates" check_expired_client_certificate || true
+    run_check "TLS rejects incorrect server identity" check_wrong_server_identity || true
+    run_check "TLS 1.2 negotiation is rejected" check_tls12_rejected || true
+
     run_check "boot-seeded ECM DTC appears in fault-listing route" check_seeded_dtc || true
     run_check "SOVD clear-faults execution reaches completed" submit_sovd_execution completed || true
     run_check "ECM DTC is gone after successful SOVD clear" check_faults_empty || true
@@ -439,9 +584,13 @@ if [[ "$SERVICES_READY" -eq 1 ]]; then
     else
         record_skip "negative SOVD execution (FRONT service could not be stopped)"
     fi
-    run_check "restart FRONT service after negative case" start_service FRONT "$FRONT_NS" "$RUN_DIR/front.log" "$FRONT_PID_FILE" "SDV_ZONE=FRONT" "SDV_TOPOLOGY=$TOPOLOGY" "$VIRTUAL_ECU_BIN" || SERVICES_READY=0
+    run_check "restart FRONT service after negative case" start_service FRONT "$FRONT_NS" "$RUN_DIR/front.log" "$FRONT_PID_FILE" \
+        "SDV_ZONE=FRONT" "SDV_TOPOLOGY=$TOPOLOGY" \
+        "SDV_TLS_CLIENT_CA_CERT=$CLIENT_CA_CERT" \
+        "SDV_TLS_CERT=$FRONT_SERVER_CERT" "SDV_TLS_KEY=$FRONT_SERVER_KEY" \
+        "$VIRTUAL_ECU_BIN" || SERVICES_READY=0
     if [[ "$SERVICES_READY" -eq 1 ]]; then
-        run_check "FRONT HTTP service recovers" wait_http "$CENTRAL_NS" "http://$FRONT_IP:9001/ecus" || SERVICES_READY=0
+        run_check "FRONT HTTPS/mTLS service recovers" wait_https "$CENTRAL_NS" "https://$FRONT_IP:9001/ecus" || SERVICES_READY=0
     fi
 else
     record_skip "DTC listing, SOVD success and negative-case checks (services not ready)"
