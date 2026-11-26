@@ -993,6 +993,7 @@ dependencies = [
  "axum-server",
  "diagnostic-common",
  "reqwest",
+ "ring",
  "rustls",
  "rustls-pki-types",
  "rustls-webpki",
