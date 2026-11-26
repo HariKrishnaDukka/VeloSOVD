@@ -9,7 +9,10 @@ members = [
     "crates/doip-gateway",
     "crates/sovd-auth",
     "crates/auth-service",
+    "crates/studio-core",
 ]
+# Desktop shell: needs webkit2gtk; built in its own CI job.
+exclude = ["sovd-studio/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

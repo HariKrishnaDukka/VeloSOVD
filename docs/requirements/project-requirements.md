@@ -86,6 +86,18 @@ SEC-14: Tool devices shall require a logged-in user; the effective role shall no
 
 SEC-15: Audit records shall name the user behind each request.
 
+STU-01: The desktop tool shall keep user tokens and device keys out of the user interface layer.
+
+STU-02: The desktop tool shall end sessions on inactivity, expiry or server rejection.
+
+STU-03: The desktop tool shall only reach allow-listed central API paths.
+
+STU-04: The desktop tool shall use mutually authenticated TLS 1.3 with a pinned server identity.
+
+STU-05: The desktop tool shall keep a request trace without secrets.
+
+STU-06: Licensable features shall be gated through a single license hook.
+
 SW-01: Both execution APIs shall share one execution store.
 
 SW-02: Every error response shall carry a machine-readable JSON error body.

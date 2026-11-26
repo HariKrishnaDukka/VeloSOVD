@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "VeloSOVD Studio",
+  "version": "0.1.0",
+  "identifier": "com.velosovd.studio",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "VeloSOVD Studio",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 680
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self' http://127.0.0.1:5173; script-src 'self' http://127.0.0.1:5173 'unsafe-inline'; style-src 'self' http://127.0.0.1:5173 'unsafe-inline'; img-src 'self' data: http://127.0.0.1:5173; connect-src ipc: http://ipc.localhost ws://127.0.0.1:5173 http://127.0.0.1:5173"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
+    "shortDescription": "SOVD diagnostic tool",
+    "category": "DeveloperTool"
+  }
+}

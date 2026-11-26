@@ -1,0 +1,16 @@
+# VeloSOVD Studio (M2) - development configuration.
+# Relative paths are relative to this file.
+#
+# Studio runs on the host; central and auth-service run inside the
+# sdv-central-ns namespace. tools/studio_tunnels.sh forwards
+# 127.0.0.1:18010 -> 10.77.10.1:8010 and 127.0.0.1:18020 -> 10.77.10.1:8020
+# as raw TCP (TLS stays end-to-end). Server certificates are verified for
+# tls_server_name, not for the dialled 127.0.0.1.
+
+auth_url = "https://127.0.0.1:18020"
+central_url = "https://127.0.0.1:18010"
+tls_server_name = "10.77.10.1"
+ca_cert = "../../pki/dev/server-ca/ca.crt"
+device_cert = "../../pki/dev/studio/velosovd-studio.crt"
+device_key = "../../pki/dev/studio/velosovd-studio.key"
+idle_timeout_secs = 900
