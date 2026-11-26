@@ -132,7 +132,11 @@ fn main() {
     let config_path = find_config();
     let studio = load_studio(config_path.as_deref());
     match &studio {
-        Ok(s) => println!("[STUDIO] config {:?}, central {}", config_path, s.config().central_url),
+        Ok(s) => println!(
+            "[STUDIO] config {:?}, central {}",
+            config_path,
+            s.config().central_url
+        ),
         Err(e) => eprintln!("[STUDIO] not configured: {e}"),
     }
 
