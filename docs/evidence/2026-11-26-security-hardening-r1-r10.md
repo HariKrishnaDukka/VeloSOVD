@@ -16,7 +16,7 @@ establish ISO 17978, ISO 14229, ISO/SAE 21434 or UNECE R155 conformance.
 | R4 audit log | `9f2b0a8` (PR #21) | sovd-server 70 passed |
 | R5 single store, R7 JSON errors | `f8bce30` | sovd-server 74 passed |
 | R8 zonal port, R9 eager manager, R10 shutdown + rotation | `548d739` | sovd-server 79 passed, vehicle-topology 4 passed |
-| R10e strict audit verification | `d1fec02` | sovd-server 80 passed |
+| R10e strict audit verification | `07e714f` (cherry-pick of `d1fec02`, merged in `3e11456`) | sovd-server 80 passed |
 
 `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings` passed at each commit.
 
@@ -94,7 +94,7 @@ Startup log (`SDV_AUDIT_MAX_BYTES=1500`):
 Files: `central-audit.jsonl`, `.000000000005`, `.000000000010`, `.000000000015`.
 Lifecycle events: seq 1 `server-start`, seq 6/11/16 `segment-start`, seq 17 `server-stop signal=SIGTERM unfinished_executions=0`.
 
-Offline verification (`d1fec02`):
+Offline verification (`d1fec02`, identical content to `07e714f` on main):
 
 | Files given | Expected exit | Observed |
 |---|---|---|
@@ -107,3 +107,11 @@ Offline verification (`d1fec02`):
 The first run of the R10 check at `548d739` accepted a removed oldest
 segment with only a note (exit 0). This was recorded as a defect and fixed in
 `d1fec02` (R10e) with regression test `dropping_the_oldest_segment_fails_strict_check`.
+
+## Merge note
+
+PR #23 (R8–R10) was merged at `548d739`, before the R10e commit `d1fec02`
+was pushed to its branch, so `main` briefly lacked the strict verification.
+R10e was cherry-picked as `07e714f` and merged in `3e11456`. Action: branch
+protection on `main` now requires passing status checks and an up-to-date
+branch before merge.
