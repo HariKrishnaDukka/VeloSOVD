@@ -624,3 +624,17 @@ Requirements and evidence: `requirements.csv` rows `PRJ-SEC-*` and `PRJ-SW-*`,
 
 These are recorded limitations of the demonstrator implementation. They are
 not claims about what ISO 17978, ISO/SAE 21434 or UNECE R155 require.
+
+
+## 11. User accounts (M1): known limitations
+
+Requirements: `PRJ-SEC-11` … `PRJ-SEC-15`. How-to: `docs/USER_ACCOUNTS.md`.
+
+| ID | Requirement | Limitation | Risk | Planned resolution |
+|---|---|---|---|---|
+| DEV-AUTH-01 | PRJ-SEC-15 | auth-service login events are plain JSON lines, not hash-chained | Login history can be edited undetected | Reuse the central audit chain in a shared crate |
+| DEV-AUTH-02 | PRJ-SEC-13 | No token revocation or refresh; a disabled user's token stays valid until expiry (max 15 min) | Short window after disabling | Revocation list or short TTL + refresh tokens |
+| DEV-AUTH-03 | PRJ-SEC-12 | Lockout counters are in memory and reset on restart; no per-IP throttling | Restart clears a lock | Persist counters; add rate limiting |
+| DEV-AUTH-04 | PRJ-SEC-11 | CLI reads passwords from stdin with echo; dev signing key is a file, not in an HSM | Shoulder-surfing; key theft from disk | Hidden prompt; HSM/TPM-held signing key |
+| DEV-AUTH-05 | PRJ-SEC-13 | OAuth2 password grant (deprecated in OAuth 2.1); ISO 17978-3 `/authorize` flow not implemented | Not the standard's full auth model | Authorization-code + PKCE with an external IdP |
+| DEV-AUTH-06 | — | auth-service reuses the central server certificate in the dev setup | Shared server identity | Own certificate per service |

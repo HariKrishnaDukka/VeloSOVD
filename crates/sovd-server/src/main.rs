@@ -149,11 +149,24 @@ async fn main() {
 
     let policy_path = std::env::var("SDV_ACCESS_POLICY")
         .unwrap_or_else(|_| "platform/config/access-policy.toml".to_string());
-    let access_policy = Arc::new(
-        authz::AccessPolicy::load(std::path::Path::new(&policy_path)).unwrap_or_else(|error| {
-            panic!("[SOVD] Access policy load failed ({policy_path}): {error}")
-        }),
-    );
+    // M1: user tokens are verified with the auth-service public key.
+    let token_key_path = std::env::var("SDV_TOKEN_PUBLIC_KEY").ok();
+    let token_verifier = token_key_path.as_ref().map(|path| {
+        let pem = std::fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("[SOVD] Token public key {path}: {error}"));
+        sovd_auth::TokenVerifier::from_spki_pem(&pem)
+            .unwrap_or_else(|error| panic!("[SOVD] Token public key {path}: {error}"))
+    });
+    let access_policy = authz::AccessPolicy::load(std::path::Path::new(&policy_path))
+        .unwrap_or_else(|error| panic!("[SOVD] Access policy load failed ({policy_path}): {error}"))
+        .with_token_verifier(token_verifier);
+    let unsatisfiable = access_policy.unsatisfiable_token_principals();
+    if !unsatisfiable.is_empty() {
+        panic!(
+            "[SOVD] Principals {unsatisfiable:?} require user tokens but SDV_TOKEN_PUBLIC_KEY is not set"
+        );
+    }
+    let access_policy = Arc::new(access_policy);
     let audit_path =
         std::env::var("SDV_AUDIT_LOG").unwrap_or_else(|_| "audit/central-audit.jsonl".to_string());
     let audit_max_bytes = std::env::var("SDV_AUDIT_MAX_BYTES")
@@ -241,6 +254,10 @@ async fn main() {
     );
     println!("[SOVD] Execution manager: ready");
     println!("[SOVD] Access policy: {policy_path} (deny by default)");
+    match &token_key_path {
+        Some(path) => println!("[SOVD] User tokens: accepted (key {path})"),
+        None => println!("[SOVD] User tokens: not accepted (SDV_TOKEN_PUBLIC_KEY unset)"),
+    }
     println!(
         "[SOVD] Audit log: {audit_path} (SHA-256 hash chain, rotate at {audit_max_bytes} bytes)"
     );

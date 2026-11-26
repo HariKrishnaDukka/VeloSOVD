@@ -76,6 +76,16 @@ SEC-09: Audit log rotation shall preserve tamper evidence across files, and inco
 
 SEC-10: Server start and stop shall be audited.
 
+SEC-11: User passwords shall be stored only as salted, slow hashes.
+
+SEC-12: Login shall resist user enumeration and brute force.
+
+SEC-13: User tokens shall be signed, time-limited and strictly verified.
+
+SEC-14: Tool devices shall require a logged-in user; the effective role shall not exceed the device or the user role.
+
+SEC-15: Audit records shall name the user behind each request.
+
 SW-01: Both execution APIs shall share one execution store.
 
 SW-02: Every error response shall carry a machine-readable JSON error body.

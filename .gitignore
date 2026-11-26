@@ -48,3 +48,6 @@ scripts/*.backup-*
 
 # Runtime audit logs (R4)
 /audit/
+
+# M1 auth-service runtime data (password hashes, login events)
+/auth/
