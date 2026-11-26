@@ -18,16 +18,33 @@ REGISTER = ROOT / "docs" / "requirements" / "requirements.csv"
 TEST_REF = re.compile(r"\b([a-z0-9][a-z0-9-]*)::((?:[a-z0-9_]+::)*)([a-z0-9_]+)\b")
 
 
+def module_path_of(src: pathlib.Path, path: pathlib.Path) -> str:
+    """Rust module path of a source file: main.rs/lib.rs -> '', a/mod.rs -> 'a', a/b.rs -> 'a::b'."""
+    parts = list(path.relative_to(src).with_suffix("").parts)
+    if parts[-1] in ("main", "lib", "mod"):
+        parts = parts[:-1]
+    return "::".join(parts)
+
+
 def test_exists(crate: str, module_path: str, name: str) -> bool:
+    """True when crates/<crate>/src has `fn name` at exactly <module_path>.
+
+    The module path is resolved strictly: a file prefix (from the file layout)
+    followed by inline `mod X` blocks inside that file. A test that moved to
+    another module therefore fails until the register is updated.
+    """
     src = ROOT / "crates" / crate / "src"
     if not src.is_dir():
         return False
-    modules = [m for m in module_path.split("::") if m]
+    wanted = [m for m in module_path.split("::") if m]
     fn = re.compile(rf"\bfn\s+{re.escape(name)}\s*\(")
     for path in src.rglob("*.rs"):
+        file_mod = [m for m in module_path_of(src, path).split("::") if m]
+        if wanted[: len(file_mod)] != file_mod:
+            continue
+        inline = wanted[len(file_mod):]
         text = path.read_text(encoding="utf-8")
-        if fn.search(text) and all(re.search(rf"\bmod\s+{m}\b", text) or m in path.stem
-                                   for m in modules):
+        if fn.search(text) and all(re.search(rf"\bmod\s+{m}\s*\{{", text) for m in inline):
             return True
     return False
 

@@ -23,7 +23,7 @@ and fault code.
 **Implementation status:** IMPLEMENTED — demonstrator-level functional tests passed; retained verification evidence is pending.
 
 **Implementation locations:**
-- `crates/sovd-server/src/main.rs` — central `fault_by_code` handler and route.
+- `crates/sovd-server/src/routes/faults.rs` — central `fault_by_code` handler; route in `routes/mod.rs`.
 - `crates/virtual-ecu/src/main.rs` — zonal `read_fault` handler and route.
 - `crates/diagnostic-common/src/lib.rs` — shared `DiagnosticFault` model.
 
@@ -65,7 +65,7 @@ a declaration of ISO 17978-3 conformance.
 
 **Implementation locations:**
 
-- `crates/sovd-server/src/main.rs` — central DELETE handlers and route registration.
+- `crates/sovd-server/src/routes/faults.rs` — central DELETE handlers; route registration in `routes/mod.rs`.
 - `crates/virtual-ecu/src/main.rs` — zonal DELETE handlers and route registration.
 - `crates/diagnostic-common/src/lib.rs` — shared diagnostic fault model and DTC-related types.
 
@@ -117,7 +117,7 @@ a declaration of ISO 17978-3 conformance.
 
 - `crates/diagnostic-common/src/lib.rs` — `DiagnosticFault` includes the raw `status: u8` field.
 - `crates/virtual-ecu/src/main.rs` — `read_faults` and `read_fault` preserve the UDS DTC status byte when constructing `DiagnosticFault`.
-- `crates/sovd-server/src/main.rs` — central fault-list handler applies the `active` query filter.
+- `crates/sovd-server/src/routes/faults.rs` — central fault-list handler applies the `active` query filter.
 
 **Implemented behaviour:**
 
@@ -156,8 +156,8 @@ a declaration of ISO 17978-3 conformance.
 
 **Implementation locations:**
 
-- `crates/sovd-server/src/main.rs` — `ecu_operation` handler retrieves an individual operation description.
-- `crates/sovd-server/src/main.rs` — central router registers the individual operation description route.
+- `crates/sovd-server/src/routes/vehicle.rs` — `ecu_operation` handler retrieves an individual operation description.
+- `crates/sovd-server/src/routes/mod.rs` — central router registers the individual operation description route.
 
 **Implemented behaviour:**
 
@@ -199,8 +199,9 @@ Normative ISO 17978-3 conformance remains unverified.
 
 **Implementation locations:**
 
-- `crates/sovd-server/src/main.rs` — SOVD execution request/response models,
-  execution handlers and route registration.
+- `crates/sovd-server/src/models.rs` — SOVD execution request/response models.
+- `crates/sovd-server/src/routes/executions.rs` — execution handlers;
+  route registration in `routes/mod.rs`.
 - `crates/sovd-server/src/execution/` — generic execution manager, lifecycle
   model, executor interface and scheduling.
 - Existing custom `/api/...` execution routes remain available separately.
