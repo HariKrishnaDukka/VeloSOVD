@@ -1398,27 +1398,38 @@ const EXECUTION_STOP_GRACE: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() {
-    // Offline check: sovd-server --verify-audit <oldest-segment> ... <current-file>
+    // Offline check:
+    //   sovd-server --verify-audit [--allow-partial] <oldest-segment> ... <current-file>
+    // Strict by default: the first file must start at genesis (seq 1), so a
+    // deleted oldest segment (head truncation) FAILS. Use --allow-partial only
+    // when old segments were removed on purpose by the retention policy.
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--verify-audit") {
-        let files: Vec<String> = if args.len() > 2 {
-            args[2..].to_vec()
-        } else {
-            vec!["audit/central-audit.jsonl".to_string()]
-        };
-        match audit::verify_files(&files) {
+        let allow_partial = args.iter().skip(2).any(|a| a == "--allow-partial");
+        let mut files: Vec<String> = args
+            .iter()
+            .skip(2)
+            .filter(|a| a.as_str() != "--allow-partial")
+            .cloned()
+            .collect();
+        if files.is_empty() {
+            files.push("audit/central-audit.jsonl".to_string());
+        }
+        let result = audit::verify_files(&files)
+            .and_then(|summary| audit::check_complete(&summary, allow_partial).map(|()| summary));
+        match result {
             Ok(summary) => {
                 println!(
-                    "[AUDIT] OK: {} entries in {} file(s), last seq {}, hash chain intact",
+                    "[AUDIT] OK: {} entries in {} file(s), last seq {}, hash chain intact{}",
                     summary.entries,
                     files.len(),
-                    summary.last_seq
+                    summary.last_seq,
+                    if summary.anchored {
+                        " (PARTIAL: starts at a segment-start, --allow-partial)"
+                    } else {
+                        " (complete from genesis)"
+                    }
                 );
-                if summary.anchored {
-                    println!(
-                        "[AUDIT] note: first file starts at a segment-start; include older segments for full proof"
-                    );
-                }
                 return;
             }
             Err(reason) => {
