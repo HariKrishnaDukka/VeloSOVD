@@ -40,7 +40,7 @@ use the ECU identifier configured in the vehicle topology.
 | POST | `/api/ecus/{id}/diagnostics/operations/clear-faults` | Direct clear-fault operation |
 | POST | `/api/ecus/{id}/operations/clear-faults/executions` | Execute the clear-fault operation |
 
-Confirm the route registration in `crates/sovd-server/src/main.rs` before
+Confirm the route registration in `crates/sovd-server/src/routes/mod.rs` before
 treating this table as a stable public API. Both clear-fault routes are currently registered in the Rust server.
 The direct route returns the ECU operation result; the execution route
 also records an entry in the central in-memory execution history.

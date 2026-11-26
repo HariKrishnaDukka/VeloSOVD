@@ -93,6 +93,8 @@ This is an architectural direction only. Implementation remains on hold until th
 
 The following references were found in the VeloSOVD GitHub `main` source tree at baseline commit `5b3854fa2e0d3c3c377b421fe429692a84e5cd22`:
 
+> **Location note (2026-11-26, R6):** `crates/sovd-server/src/main.rs` was split into modules. Routes are now registered in `src/routes/mod.rs` (`build_router`); handlers live in `src/routes/*.rs`; request/response models in `src/models.rs`. File and line references below refer to the stated baseline commit.
+
 | File | Location | Context | Classification |
 |---|---|---|---|
 | `crates/sovd-server/src/main.rs` | line 807 | Constructs production execution `Location` header | Production dependency |

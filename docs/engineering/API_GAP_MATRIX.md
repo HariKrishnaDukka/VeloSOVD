@@ -6,6 +6,8 @@
 **Scope:** Every HTTP path/method operation in `sovd-api.yaml` and `authentication-api.yaml` in the supplied ISO 17978-3 OpenAPI package.  
 **Important limitation:** The package states that it is informative and that the normative REST API definition is in the specification. This matrix is a source-level gap assessment against the informative package, not a standards-conformance claim.
 
+> **Location note (2026-11-26, R6):** `crates/sovd-server/src/main.rs` was split into modules. Routes are now registered in `src/routes/mod.rs` (`build_router`); handlers live in `src/routes/*.rs`; request/response models in `src/models.rs`. File and line references below refer to the stated baseline commit.
+
 ## Summary
 
 | Status | Count |
