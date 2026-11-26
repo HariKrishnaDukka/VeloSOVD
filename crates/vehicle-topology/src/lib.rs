@@ -37,6 +37,13 @@ pub struct Zone {
     pub zonal_ip: String,
     pub doip_port: u16,
     pub doip_logical_address: u16,
+    /// R8: HTTPS port of this zone's diagnostic service (central -> zonal).
+    #[serde(default = "default_zonal_http_port")]
+    pub zonal_http_port: u16,
+}
+
+fn default_zonal_http_port() -> u16 {
+    9001
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -106,6 +113,13 @@ impl VehicleTopology {
                 || zone.zonal_ip.parse::<IpAddr>().is_err()
             {
                 errors.push(format!("Zone {} has an invalid IP address", zone.id));
+            }
+
+            if zone.zonal_http_port == 0 || zone.zonal_http_port == zone.doip_port {
+                errors.push(format!(
+                    "Zone {} has an invalid zonal HTTP port (0 or equal to DoIP port)",
+                    zone.id
+                ));
             }
 
             if zone.doip_port == 0 {
@@ -196,6 +210,39 @@ impl VehicleTopology {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn load_current() -> VehicleTopology {
+        VehicleTopology::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../platform/config/vehicle-topology.toml"
+        ))
+        .expect("vehicle topology should load")
+    }
+
+    #[test]
+    fn zonal_http_port_is_loaded_and_validated() {
+        let mut topology = load_current();
+        assert!(topology.zones.iter().all(|z| z.zonal_http_port == 9001));
+
+        topology.zones[0].zonal_http_port = 0;
+        assert!(topology.validate().unwrap_err().contains("zonal HTTP port"));
+
+        let mut topology = load_current();
+        topology.zones[0].zonal_http_port = topology.zones[0].doip_port;
+        assert!(topology.validate().unwrap_err().contains("zonal HTTP port"));
+    }
+
+    #[test]
+    fn zonal_http_port_defaults_to_9001_when_absent() {
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../platform/config/vehicle-topology.toml"
+        ))
+        .unwrap()
+        .replace("zonal_http_port = 9001\n", "");
+        let topology: VehicleTopology = toml::from_str(&text).unwrap();
+        assert!(topology.zones.iter().all(|z| z.zonal_http_port == 9001));
+    }
 
     #[test]
     fn current_vehicle_topology_is_valid() {

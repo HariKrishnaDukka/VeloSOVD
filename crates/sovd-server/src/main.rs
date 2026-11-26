@@ -1356,24 +1356,73 @@ fn build_zonal_mtls_client() -> Result<Client, Box<dyn std::error::Error + Send 
         .map_err(Into::into)
 }
 
+/// R8: one zonal HTTPS port for all zones (taken from the topology file).
+fn uniform_zonal_http_port(topology: &VehicleTopology) -> Result<u16, String> {
+    let mut ports: Vec<u16> = topology.zones.iter().map(|z| z.zonal_http_port).collect();
+    ports.sort_unstable();
+    ports.dedup();
+    match ports.as_slice() {
+        [port] => Ok(*port),
+        [] => Err("topology defines no zones".to_string()),
+        many => Err(format!(
+            "zones use different zonal_http_port values {many:?}; per-zone ports are not supported yet"
+        )),
+    }
+}
+
+/// R10: resolve on Ctrl-C or SIGTERM (systemd / `kill`).
+async fn shutdown_signal() -> &'static str {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => "SIGINT",
+        _ = terminate => "SIGTERM",
+    }
+}
+
+const SHUTDOWN_DRAIN: Duration = Duration::from_secs(10);
+const EXECUTION_STOP_GRACE: Duration = Duration::from_secs(5);
+
 #[tokio::main]
 async fn main() {
-    // Offline check: sovd-server --verify-audit <path>
+    // Offline check: sovd-server --verify-audit <oldest-segment> ... <current-file>
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--verify-audit") {
-        let path = args
-            .get(2)
-            .map(String::as_str)
-            .unwrap_or("audit/central-audit.jsonl");
-        let text = std::fs::read_to_string(path)
-            .unwrap_or_else(|error| panic!("[AUDIT] cannot read {path}: {error}"));
-        match audit::verify_chain(&text) {
-            Ok(count) => {
-                println!("[AUDIT] OK: {count} entries, hash chain intact ({path})");
+        let files: Vec<String> = if args.len() > 2 {
+            args[2..].to_vec()
+        } else {
+            vec!["audit/central-audit.jsonl".to_string()]
+        };
+        match audit::verify_files(&files) {
+            Ok(summary) => {
+                println!(
+                    "[AUDIT] OK: {} entries in {} file(s), last seq {}, hash chain intact",
+                    summary.entries,
+                    files.len(),
+                    summary.last_seq
+                );
+                if summary.anchored {
+                    println!(
+                        "[AUDIT] note: first file starts at a segment-start; include older segments for full proof"
+                    );
+                }
                 return;
             }
             Err(reason) => {
-                eprintln!("[AUDIT] FAILED: {reason} ({path})");
+                eprintln!("[AUDIT] FAILED: {reason}");
                 std::process::exit(2);
             }
         }
@@ -1385,6 +1434,9 @@ async fn main() {
     let topology = VehicleTopology::load(&topology_path)
         .unwrap_or_else(|error| panic!("Topology load failed: {error}"));
 
+    let zonal_http_port = uniform_zonal_http_port(&topology)
+        .unwrap_or_else(|error| panic!("[SOVD] Topology zonal port error: {error}"));
+
     let client = build_zonal_mtls_client().unwrap_or_else(|error| {
         panic!("Cannot initialize Central-to-Zonal mTLS client: {error}");
     });
@@ -1392,10 +1444,17 @@ async fn main() {
     let state = AppState {
         client,
         topology,
-        zonal_http_port: 9001,
+        zonal_http_port,
+        // Production path is always HTTPS + mTLS; plain HTTP exists only in tests.
         zonal_scheme: "https",
         execution_manager: Arc::new(OnceCell::new()),
     };
+
+    // R9: build the execution manager now, so a broken setup fails at startup
+    // instead of on the first operation request.
+    get_execution_manager(&state)
+        .await
+        .unwrap_or_else(|status| panic!("[SOVD] Execution manager init failed: {status}"));
 
     let policy_path = std::env::var("SDV_ACCESS_POLICY")
         .unwrap_or_else(|_| "platform/config/access-policy.toml".to_string());
@@ -1406,12 +1465,19 @@ async fn main() {
     );
     let audit_path =
         std::env::var("SDV_AUDIT_LOG").unwrap_or_else(|_| "audit/central-audit.jsonl".to_string());
+    let audit_max_bytes = std::env::var("SDV_AUDIT_MAX_BYTES")
+        .ok()
+        .map(|v| {
+            v.parse::<u64>()
+                .unwrap_or_else(|_| panic!("[SOVD] SDV_AUDIT_MAX_BYTES must be a number: {v}"))
+        })
+        .unwrap_or(audit::DEFAULT_MAX_BYTES);
     let audit_log = Arc::new(
-        audit::AuditLog::open(std::path::Path::new(&audit_path))
+        audit::AuditLog::open_with_limit(std::path::Path::new(&audit_path), audit_max_bytes)
             .unwrap_or_else(|error| panic!("[SOVD] Audit log open failed ({audit_path}): {error}")),
     );
     let audit_state = audit::AuditState {
-        log: audit_log,
+        log: Arc::clone(&audit_log),
         policy: Arc::clone(&access_policy),
     };
     let request_limits = Arc::new(limits::RequestLimits::new(
@@ -1477,12 +1543,16 @@ async fn main() {
     println!("[SOVD] Listening at https://{bind_address} (TLS 1.3, mTLS required)");
     println!("[SOVD] Configured zones: {}", state.topology.zones.len());
     println!("[SOVD] Configured ECUs: {}", state.topology.ecus.len());
+    println!("[SOVD] Zonal endpoint: https://<zonal_ip>:{zonal_http_port} (from topology)");
     println!(
         "[SOVD] Operation history capacity: {}",
         EXECUTION_HISTORY_CAPACITY
     );
+    println!("[SOVD] Execution manager: ready");
     println!("[SOVD] Access policy: {policy_path} (deny by default)");
-    println!("[SOVD] Audit log: {audit_path} (SHA-256 hash chain)");
+    println!(
+        "[SOVD] Audit log: {audit_path} (SHA-256 hash chain, rotate at {audit_max_bytes} bytes)"
+    );
     println!(
         "[SOVD] Limits: {} concurrent, {:?} timeout, {} byte body",
         limits::DEFAULT_MAX_CONCURRENT_REQUESTS,
@@ -1490,10 +1560,41 @@ async fn main() {
         limits::DEFAULT_MAX_BODY_BYTES
     );
 
+    if let Err(error) = audit_log.record_event("server-start", &bind_address) {
+        eprintln!("[AUDIT] write failed: {error}");
+    }
+
+    // R10: graceful shutdown. Stop accepting, drain in-flight requests,
+    // then stop executions and close the audit chain.
+    let handle = axum_server::Handle::new();
+    let signal_handle = handle.clone();
+    let (signal_tx, signal_rx) = tokio::sync::oneshot::channel::<&'static str>();
+    tokio::spawn(async move {
+        let signal = shutdown_signal().await;
+        println!("[SOVD] {signal} received; draining requests for up to {SHUTDOWN_DRAIN:?}");
+        let _ = signal_tx.send(signal);
+        signal_handle.graceful_shutdown(Some(SHUTDOWN_DRAIN));
+    });
+
     tls_server
+        .handle(handle)
         .serve(app.into_make_service())
         .await
         .expect("Central HTTPS server failed");
+
+    let signal = signal_rx.await.unwrap_or("server-exit");
+    let mut detail = format!("signal={signal}");
+    if let Some(manager) = state.execution_manager.get() {
+        let unfinished = manager.shutdown(EXECUTION_STOP_GRACE).await;
+        if !unfinished.is_empty() {
+            println!("[SOVD] Executions not stopped cleanly: {unfinished:?}");
+        }
+        detail.push_str(&format!(" unfinished_executions={}", unfinished.len()));
+    }
+    if let Err(error) = audit_log.record_event("server-stop", &detail) {
+        eprintln!("[AUDIT] write failed: {error}");
+    }
+    println!("[SOVD] Shutdown complete ({detail})");
 }
 
 #[cfg(test)]
@@ -2875,5 +2976,41 @@ mod raw_uds_policy_tests {
     #[test]
     fn session_control_without_subfunction_is_bad_request() {
         assert_eq!(check_raw_uds_policy("10"), Err(StatusCode::BAD_REQUEST));
+    }
+}
+
+#[cfg(test)]
+mod zonal_port_tests {
+    use super::uniform_zonal_http_port;
+    use vehicle_topology::VehicleTopology;
+
+    fn topology() -> VehicleTopology {
+        VehicleTopology::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../platform/config/vehicle-topology.toml"
+        ))
+        .expect("Test topology must load")
+    }
+
+    #[test]
+    fn uses_the_configured_port() {
+        let mut t = topology();
+        for zone in &mut t.zones {
+            zone.zonal_http_port = 9443;
+        }
+        assert_eq!(uniform_zonal_http_port(&t), Ok(9443));
+    }
+
+    #[test]
+    fn rejects_mixed_ports_and_no_zones() {
+        let mut t = topology();
+        t.zones[0].zonal_http_port = 9443;
+        assert!(
+            uniform_zonal_http_port(&t)
+                .unwrap_err()
+                .contains("different")
+        );
+        t.zones.clear();
+        assert!(uniform_zonal_http_port(&t).is_err());
     }
 }

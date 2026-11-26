@@ -594,8 +594,8 @@ async fn main() {
 
     // Bind before starting transport threads. A bind failure must not
     // leave detached ISO-TP threads running.
-    let bind_address =
-        std::env::var("SDV_HTTP_BIND").unwrap_or_else(|_| "0.0.0.0:9001".to_string());
+    let bind_address = std::env::var("SDV_HTTP_BIND")
+        .unwrap_or_else(|_| format!("0.0.0.0:{}", selected_zone_config.zonal_http_port));
 
     let listener = tokio::net::TcpListener::bind(&bind_address)
         .await
