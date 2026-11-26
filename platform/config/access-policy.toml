@@ -8,6 +8,9 @@
 #   technician  viewer + clear faults + start/stop operation executions
 #   engineer    technician + raw UDS passthrough (still R1 allow-listed)
 #
+# require_user_token = true (M1): the device must also send a user token
+# from auth-service; effective role = min(device role, user role).
+#
 # First matching entry wins. Development identities only.
 
 [[principal]]
@@ -17,3 +20,10 @@ role = "engineer"
 [[principal]]
 dns_name = "workshop-viewer"
 role = "viewer"
+
+# VeloSOVD Studio desktop tool: engineer ceiling, but every request must
+# carry a logged-in user's token (M1).
+[[principal]]
+dns_name = "velosovd-studio"
+role = "engineer"
+require_user_token = true

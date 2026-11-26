@@ -7,6 +7,8 @@ members = [
     "crates/vehicle-topology",
     "crates/uds-protocol",
     "crates/doip-gateway",
+    "crates/sovd-auth",
+    "crates/auth-service",
 ]
 
 [workspace.package]
@@ -24,3 +26,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 rustls-pki-types = { version = "1", features = ["std"] }
 axum-server = { version = "0.9", default-features = false, features = ["tls-rustls-ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# argon2 is deliberately slow; optimise it even in debug builds so tests and
+# local logins stay fast. Security strength is set by its parameters, not by
+# the build profile.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

@@ -370,6 +370,12 @@ pub async fn audit(
     }
 
     let response = next.run(request).await;
+    // M1: authz attaches the verified identity (device + user) to the response.
+    let identity = response
+        .extensions()
+        .get::<crate::authz::ClientIdentity>()
+        .cloned()
+        .or(identity);
     write_event(&state, &identity, &method, &path, sid, &response, started);
     response
 }
@@ -402,16 +408,26 @@ fn write_event(
                 .map(|i| format!("{:?}", i.role).to_lowercase())
         ),
     );
+    if let Some(id) = identity {
+        if let Some(user) = &id.user {
+            fields.insert("user".into(), json!(user));
+        }
+        if let Some(jti) = &id.token_id {
+            fields.insert("token_id".into(), json!(jti));
+        }
+    }
     fields.insert("method".into(), json!(method.as_str()));
     fields.insert("path".into(), json!(path));
     fields.insert("status".into(), json!(status.as_u16()));
     fields.insert(
         "decision".into(),
-        json!(if status == StatusCode::FORBIDDEN {
-            "deny"
-        } else {
-            "allow"
-        }),
+        json!(
+            if status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED {
+                "deny"
+            } else {
+                "allow"
+            }
+        ),
     );
     fields.insert(
         "duration_ms".into(),

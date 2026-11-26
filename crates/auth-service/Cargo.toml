@@ -1,0 +1,22 @@
+[package]
+name = "auth-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+axum.workspace = true
+axum-server.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+ring = "0.17"
+argon2 = { version = "0.5", default-features = false, features = ["alloc", "password-hash"] }
+sovd-auth = { path = "../sovd-auth" }
+
+[dev-dependencies]
+reqwest.workspace = true
+base64 = "0.22"
