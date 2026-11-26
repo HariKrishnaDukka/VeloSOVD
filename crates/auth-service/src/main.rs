@@ -20,6 +20,8 @@
 mod login;
 mod server;
 mod store;
+#[cfg(test)]
+mod test_util;
 mod tls_config;
 
 use std::{io::BufRead, path::PathBuf};

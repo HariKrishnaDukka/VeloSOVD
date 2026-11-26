@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn save_load_roundtrip_and_management() {
-        let dir = std::env::temp_dir().join(format!("velo-users-{}", std::process::id()));
+        let dir = crate::test_util::unique_dir("users");
         let path = dir.join("users.toml");
         let mut s = UserStore::default();
         s.add("hari", "technician", "long enough pw", true).unwrap();

@@ -222,11 +222,7 @@ mod tests {
     }
 
     async fn serve_plain() -> (String, PathBuf) {
-        let dir = std::env::temp_dir().join(format!(
-            "velo-auth-{}-{}",
-            std::process::id(),
-            unix_now() as u128 * 1000 + Instant::now().elapsed().as_nanos()
-        ));
+        let dir = crate::test_util::unique_dir("auth");
         let path = dir.join("users.toml");
         let mut store = UserStore::default();
         store
