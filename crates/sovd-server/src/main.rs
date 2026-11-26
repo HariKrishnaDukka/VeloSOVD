@@ -406,6 +406,41 @@ fn validate_payload_hex(input: &str) -> Result<String, StatusCode> {
     Ok(compact)
 }
 
+/// UDS services the raw passthrough endpoint may forward.
+///
+/// Deny by default: only read-only diagnostics and session keep-alive are
+/// allowed. Write (0x2E), reset (0x11), routines (0x31), security access
+/// (0x27), authentication (0x29), communication control (0x28),
+/// DTC setting (0x85), clear DTC (0x14) and all download / upload / transfer
+/// services (0x34-0x38) are refused here; they must go through dedicated,
+/// authorized SOVD resources.
+const RAW_UDS_ALLOWED_SIDS: [u8; 4] = [0x10, 0x19, 0x22, 0x3E];
+
+/// DiagnosticSessionControl sub-functions allowed through the raw endpoint.
+/// Programming session (0x02) and vendor sessions are refused.
+const RAW_UDS_ALLOWED_SESSIONS: [u8; 2] = [0x01, 0x03];
+
+/// Apply the raw UDS passthrough policy to a validated, normalized hex payload.
+fn check_raw_uds_policy(normalized_hex: &str) -> Result<(), StatusCode> {
+    let sid = u8::from_str_radix(normalized_hex.get(0..2).ok_or(StatusCode::BAD_REQUEST)?, 16)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    if !RAW_UDS_ALLOWED_SIDS.contains(&sid) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if sid == 0x10 {
+        let sub = u8::from_str_radix(normalized_hex.get(2..4).ok_or(StatusCode::BAD_REQUEST)?, 16)
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+        // Bit 7 is suppressPosRspMsgIndicationBit; policy applies to the session type.
+        if !RAW_UDS_ALLOWED_SESSIONS.contains(&(sub & 0x7F)) {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+
+    Ok(())
+}
+
 fn resolve_ecu_url(state: &AppState, ecu_id: &str) -> Result<String, StatusCode> {
     let ecu: &Ecu = state
         .topology
@@ -1231,6 +1266,7 @@ async fn diagnostic_request(
     Json(request): Json<UdsDiagnosticRequest>,
 ) -> Result<Json<UdsDiagnosticResponse>, StatusCode> {
     let normalized_payload = validate_payload_hex(&request.payload_hex)?;
+    check_raw_uds_policy(&normalized_payload)?;
 
     let normalized_request = UdsDiagnosticRequest {
         payload_hex: normalized_payload,
@@ -2803,5 +2839,57 @@ mod clear_fault_history_tests {
 
         central_task.abort();
         mock_task.abort();
+    }
+}
+
+#[cfg(test)]
+mod raw_uds_policy_tests {
+    use super::check_raw_uds_policy;
+    use axum::http::StatusCode;
+
+    #[test]
+    fn allows_read_only_services() {
+        for payload in ["22F190", "1902FF", "3E00", "3E80", "1001", "1003", "1083"] {
+            assert_eq!(check_raw_uds_policy(payload), Ok(()), "{payload}");
+        }
+    }
+
+    #[test]
+    fn refuses_write_reset_routine_security_and_transfer() {
+        for payload in [
+            "2EF19001",
+            "1101",
+            "3101FF00",
+            "2701",
+            "2901",
+            "280300",
+            "8502",
+            "14FFFFFF",
+            "3400441000000000000100",
+            "3601",
+            "37",
+        ] {
+            assert_eq!(
+                check_raw_uds_policy(payload),
+                Err(StatusCode::FORBIDDEN),
+                "{payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_programming_and_unknown_sessions() {
+        for payload in ["1002", "1082", "1040", "1060"] {
+            assert_eq!(
+                check_raw_uds_policy(payload),
+                Err(StatusCode::FORBIDDEN),
+                "{payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_control_without_subfunction_is_bad_request() {
+        assert_eq!(check_raw_uds_policy("10"), Err(StatusCode::BAD_REQUEST));
     }
 }
