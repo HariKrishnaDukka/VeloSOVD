@@ -15,3 +15,5 @@ vehicle-topology = { path = "../vehicle-topology" }
 axum-server.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true
+rustls-webpki = { version = "0.103", default-features = false, features = ["std"] }
+toml.workspace = true

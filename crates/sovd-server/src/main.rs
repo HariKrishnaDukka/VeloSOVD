@@ -1,4 +1,6 @@
+mod authz;
 pub mod execution;
+mod limits;
 mod tls_config;
 
 use serde::{Deserialize, Serialize};
@@ -20,8 +22,9 @@ use crate::execution::{
 };
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{StatusCode, header},
+    middleware,
     response::IntoResponse,
     routing::{get, post},
 };
@@ -1409,7 +1412,30 @@ async fn main() {
         execution_manager: Arc::new(OnceCell::new()),
     };
 
-    let app = build_router(state.clone());
+    let policy_path = std::env::var("SDV_ACCESS_POLICY")
+        .unwrap_or_else(|_| "platform/config/access-policy.toml".to_string());
+    let access_policy = Arc::new(
+        authz::AccessPolicy::load(std::path::Path::new(&policy_path)).unwrap_or_else(|error| {
+            panic!("[SOVD] Access policy load failed ({policy_path}): {error}")
+        }),
+    );
+    let request_limits = Arc::new(limits::RequestLimits::new(
+        limits::DEFAULT_MAX_CONCURRENT_REQUESTS,
+        limits::DEFAULT_REQUEST_TIMEOUT,
+    ));
+
+    // Layer order: last added runs first.
+    // limits (503/504) -> authz (403) -> body limit (413) -> routes
+    let app = build_router(state.clone())
+        .layer(DefaultBodyLimit::max(limits::DEFAULT_MAX_BODY_BYTES))
+        .layer(middleware::from_fn_with_state(
+            access_policy,
+            authz::authorize,
+        ))
+        .layer(middleware::from_fn_with_state(
+            request_limits,
+            limits::enforce,
+        ));
 
     let bind_address = format!(
         "{}:{}",
@@ -1457,6 +1483,13 @@ async fn main() {
     println!(
         "[SOVD] Operation history capacity: {}",
         EXECUTION_HISTORY_CAPACITY
+    );
+    println!("[SOVD] Access policy: {policy_path} (deny by default)");
+    println!(
+        "[SOVD] Limits: {} concurrent, {:?} timeout, {} byte body",
+        limits::DEFAULT_MAX_CONCURRENT_REQUESTS,
+        limits::DEFAULT_REQUEST_TIMEOUT,
+        limits::DEFAULT_MAX_BODY_BYTES
     );
 
     tls_server

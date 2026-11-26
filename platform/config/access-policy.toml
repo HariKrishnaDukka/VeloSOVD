@@ -1,0 +1,19 @@
+# VeloSOVD central SOVD server - access policy (R2).
+#
+# Maps the DNS subjectAltName of an mTLS client certificate to a role.
+# Deny by default: a certificate whose DNS SAN is not listed gets HTTP 403.
+#
+# Roles (low -> high):
+#   viewer      GET on all resources
+#   technician  viewer + clear faults + start/stop operation executions
+#   engineer    technician + raw UDS passthrough (still R1 allow-listed)
+#
+# First matching entry wins. Development identities only.
+
+[[principal]]
+dns_name = "harness-client"
+role = "engineer"
+
+[[principal]]
+dns_name = "workshop-viewer"
+role = "viewer"
