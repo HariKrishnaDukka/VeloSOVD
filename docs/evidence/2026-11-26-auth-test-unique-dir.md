@@ -49,7 +49,7 @@ f2a5d8d Merge pull request #28 from HariKrishnaDukka/docs/m1-live-evidence
 
 ## Deviation from the test sheet
 
-After the sheet was complete, a second `git am --keep-cr` of the same patch was run on the local `main` branch (output: `Applying: test(auth): ...`, no error). The push in check 12 had already been done, and its output shows only the new branch `fix/auth-test-unique-dir` being created on origin, so `origin/main` was not changed. The state of local `main` after that command, and its recovery, were not printed in this run.
+After the sheet was complete, a second `git am --keep-cr` of the same patch was run on the local `main` branch (output: `Applying: test(auth): ...`, no error). The push in check 12 had already been done, and its output shows only the new branch `fix/auth-test-unique-dir` being created on origin, so `origin/main` was not changed. Recovery output: before the reset, `git status` showed local `main` ahead of `origin/main` by 1 commit (`a1ad4c7`, a second copy of `01f8c53`); `origin/fix/auth-test-unique-dir` still pointed at `01f8c53`. After `git reset --hard origin/main`: HEAD `f2a5d8d`, `## main...origin/main`, 0 commits ahead. At the next `git fetch`, `origin/main` had moved from `f2a5d8d` to `8eac61d`, the merge of PR #29 (`fix/auth-test-unique-dir`, containing `01f8c53`); checks 1 to 14 ran against `f2a5d8d`. On the later main `65b13a9` (merge of PR #30, this evidence file) the 12 auth-service tests passed (0.37 s) and traceability reported 57 references, 0 problems.
 
 ## Not observed in this run
 
