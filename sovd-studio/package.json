@@ -10,6 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tauri-apps/api": "2.12.4",
+    "dockview": "8.9.0",
+    "dockview-core": "8.9.0",
+    "dockview-react": "8.8.3",
     "lucide-react": "^1.72.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -26,5 +30,11 @@
     "tailwindcss": "^4.3.5",
     "typescript": "~7.0.2",
     "vite": "^8.3.6"
+  },
+  "overrides": {
+    "@jridgewell/resolve-uri": "3.1.2",
+    "@rolldown/pluginutils": "1.1.0",
+    "enhanced-resolve": "5.26.1",
+    "graceful-fs": "4.2.11"
   }
 }

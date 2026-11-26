@@ -9,6 +9,7 @@ import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { api } from "./services/api";
+import { inTauri } from "./services/transport";
 import type { Ecu, Fault, DiagnosticValue } from "./types";
 
 type Page = "overview" | "ecus" | "diagnostics" | "explorer";
@@ -87,8 +88,8 @@ export default function App() {
     }
   }
 
-  return <div className="min-h-screen bg-[#080d18] text-slate-100">
-    <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-slate-800 bg-[#0b1220] p-5 lg:flex lg:flex-col">
+  return <div className="relative flex h-full bg-[#080d18] text-slate-100">
+    <aside className="hidden w-64 shrink-0 overflow-auto border-r border-slate-800 bg-[#0b1220] p-5 md:flex md:flex-col">
       <div className="mb-10 flex items-center gap-3">
         <div className="rounded-xl bg-cyan-400/10 p-3 text-cyan-300"><CarFront size={25}/></div>
         <div><div className="font-bold tracking-wide">SOVD STUDIO</div><div className="text-xs text-slate-500">Vehicle Diagnostic Platform</div></div>
@@ -100,10 +101,10 @@ export default function App() {
         <Nav active={page==="diagnostics"} icon={<Activity size={17}/>} onClick={()=>setPage("diagnostics")}>Diagnostics</Nav>
         <Nav active={page==="explorer"} icon={<Terminal size={17}/>} onClick={()=>setPage("explorer")}>SOVD Explorer</Nav>
       </nav>
-      <div className="panel mt-auto p-4 text-xs"><div className="flex items-center gap-2 text-emerald-300"><Wifi size={14}/> CENTRAL API</div><div className="mt-2 text-slate-500">Host development proxy</div><div className="mt-1 text-cyan-300">127.0.0.1:18010</div></div>
+      <div className="panel mt-auto p-4 text-xs"><div className="flex items-center gap-2 text-emerald-300"><Wifi size={14}/> CENTRAL API</div><div className="mt-2 text-slate-500">{inTauri() ? "Studio core (mTLS + user login)" : "Host development proxy"}</div><div className="mt-1 text-cyan-300">{inTauri() ? "audited per user" : "127.0.0.1:18010"}</div></div>
     </aside>
 
-    <main className="lg:ml-64">
+    <main className="min-w-0 flex-1 overflow-auto">
       <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between border-b border-slate-800 bg-[#080d18]/95 px-5 backdrop-blur md:px-8">
         <div><div className="text-xs text-slate-500">VIRTUAL VEHICLE / DIAGNOSTICS</div><h1 className="mt-1 text-lg font-semibold">{page==="overview"?"Vehicle Overview":page==="ecus"?"ECU Explorer":page==="explorer"?"SOVD Explorer":"Fault Diagnostics"}</h1></div>
         <div className="flex items-center gap-3"><span className="hidden rounded-full bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300 sm:block"><span className="mr-2 inline-block h-2 w-2 rounded-full bg-emerald-400"/>API polling</span><button onClick={()=>void loadEcus()} className="rounded-lg border border-slate-700 p-2.5"><RefreshCw size={16}/></button></div>
@@ -148,7 +149,7 @@ export default function App() {
         <footer className="mt-10 border-t border-slate-800 pt-5 text-xs text-slate-600">SOVD Vehicle Diagnostic Studio · Development build</footer>
       </div>
     </main>
-    <div className="fixed bottom-0 left-0 right-0 z-20 grid grid-cols-4 border-t border-slate-800 bg-[#0b1220] p-2 lg:hidden"><Mobile active={page==="overview"} onClick={()=>setPage("overview")} icon={<LayoutDashboard size={18}/>} label="Overview"/><Mobile active={page==="ecus"} onClick={()=>setPage("ecus")} icon={<Cpu size={18}/>} label="ECUs"/><Mobile active={page==="diagnostics"} onClick={()=>setPage("diagnostics")} icon={<Activity size={18}/>} label="Diagnostics"/><Mobile active={page==="explorer"} onClick={()=>setPage("explorer")} icon={<Terminal size={18}/>} label="Explorer"/></div>
+    <div className="absolute bottom-0 left-0 right-0 z-20 grid grid-cols-4 border-t border-slate-800 bg-[#0b1220] p-2 md:hidden"><Mobile active={page==="overview"} onClick={()=>setPage("overview")} icon={<LayoutDashboard size={18}/>} label="Overview"/><Mobile active={page==="ecus"} onClick={()=>setPage("ecus")} icon={<Cpu size={18}/>} label="ECUs"/><Mobile active={page==="diagnostics"} onClick={()=>setPage("diagnostics")} icon={<Activity size={18}/>} label="Diagnostics"/><Mobile active={page==="explorer"} onClick={()=>setPage("explorer")} icon={<Terminal size={18}/>} label="Explorer"/></div>
   </div>;
 }
 

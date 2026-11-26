@@ -102,6 +102,50 @@ jobs:
       - name: Build frontend (includes TypeScript project checks)
         run: npm run build
 
+  studio-desktop:
+    name: Studio desktop shell (Tauri)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install WebView build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install stable Rust with required components
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sovd-studio/src-tauri
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sovd-studio/package-lock.json
+
+      - name: Build frontend bundle embedded by the shell
+        working-directory: sovd-studio
+        run: |
+          npm ci
+          npm run build
+
+      - name: Check formatting
+        working-directory: sovd-studio/src-tauri
+        run: cargo fmt -- --check
+
+      - name: Clippy (locked dependencies)
+        working-directory: sovd-studio/src-tauri
+        run: cargo clippy --locked --all-targets -- -D warnings
+
   opensovd-models-prototype:
     name: Isolated OpenSOVD models prototype
     runs-on: ubuntu-latest

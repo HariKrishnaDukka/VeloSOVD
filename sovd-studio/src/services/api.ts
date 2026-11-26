@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ensureOk, request } from "./transport";
 import {
   EcuSchema, ValueSchema, FaultSchema, OperationSchema,
   UdsResponseSchema, TopologySchema, HealthSchema,
@@ -6,30 +7,24 @@ import {
   OperationExecutionSchema,
 } from "../types";
 
-async function get<T>(path: string, schema: z.ZodType<T>): Promise<T> {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  return schema.parse(await response.json());
+async function call<T>(method: string, path: string, schema: z.ZodType<T>, body?: unknown): Promise<T> {
+  const response = ensureOk(await request(method, path, body === undefined ? undefined : JSON.stringify(body)));
+  return schema.parse(response.body ? JSON.parse(response.body) : null);
 }
+
+const get = <T,>(path: string, schema: z.ZodType<T>) => call("GET", path, schema);
 
 export const api = {
   ecus: () => get("/api/ecus", z.array(EcuSchema)),
   topology: () => get("/api/topology", TopologySchema),
   health: () => get("/api/health", HealthSchema),
-  udsRequest: async (id: string, payloadHex: string) => {
-    const response = await fetch(
+  udsRequest: (id: string, payloadHex: string) =>
+    call(
+      "POST",
       `/api/ecus/${encodeURIComponent(id)}/diagnostics/requests`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ payload_hex: payloadHex }),
-      },
-    );
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    return UdsResponseSchema.parse(await response.json());
-  },
+      UdsResponseSchema,
+      { payload_hex: payloadHex },
+    ),
   speed: (id: string) =>
     get(`/api/ecus/${encodeURIComponent(id)}/data/vehicle-speed`, ValueSchema),
   resources: (id: string) =>
@@ -47,14 +42,7 @@ export const api = {
     if (!executionPath.startsWith("/api/") || executionPath.startsWith("//")) {
       throw new Error("Invalid operation execution path returned by server.");
     }
-    const response = await fetch(executionPath, {
-      method: "POST",
-      headers: { Accept: "application/json" },
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    return OperationExecutionSchema.parse(await response.json());
+    return call("POST", executionPath, OperationExecutionSchema);
   },
   executions: (id: string, operationId: string) =>
   get(
@@ -66,12 +54,10 @@ execution: (id: string, operationId: string, executionId: string) =>
     `/api/ecus/${encodeURIComponent(id)}/operations/${encodeURIComponent(operationId)}/executions/${encodeURIComponent(executionId)}`,
     OperationExecutionSchema,
   ),
-  clearFaults: async (id: string) => {
-    const response = await fetch(
+  clearFaults: (id: string) =>
+    call(
+      "POST",
       `/api/ecus/${encodeURIComponent(id)}/diagnostics/operations/clear-faults`,
-      { method: "POST", headers: { Accept: "application/json" } },
-    );
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    return OperationSchema.parse(await response.json());
-  },
+      OperationSchema,
+    ),
 };

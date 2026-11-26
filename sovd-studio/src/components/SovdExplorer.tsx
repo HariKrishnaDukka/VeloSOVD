@@ -5,6 +5,7 @@ import {
   Terminal, Wifi, Play, Clock3,
 } from "lucide-react";
 import { api } from "../services/api";
+import { inTauri, request } from "../services/transport";
 import type {
   Ecu, Fault, ResourceDescriptor, OperationDescriptor, OperationExecution,
 } from "../types";
@@ -99,8 +100,6 @@ export default function SovdExplorer() {
       return "Local Rust SOVD";
     }
   });
-  const [bearerToken, setBearerToken] = useState("");
-  const [authEnabled, setAuthEnabled] = useState(false);
 
   const [response, setResponse] = useState("");
   const [status, setStatus] = useState<number | null>(null);
@@ -256,28 +255,18 @@ export default function SovdExplorer() {
       return;
     }
 
-    const headers: Record<string, string> = { Accept: "application/json" };
-    if (authEnabled && bearerToken.trim()) {
-      headers.Authorization = `Bearer ${bearerToken.trim()}`;
-    }
-    if (method === "POST" && body.trim()) {
-      headers["Content-Type"] = "application/json";
-    }
-
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 10000);
+    // Desktop: Rust adds the device certificate and the user's token.
+    // Browser dev mode: same-origin /api proxy. No token is ever handled here.
     const started = performance.now();
     setBusy(true);
 
     try {
-      const result = await fetch(target.toString(), {
+      const result = await request(
         method,
-        headers,
-        body: method === "POST" && body.trim() ? body : undefined,
-        credentials: "same-origin",
-        signal: controller.signal,
-      });
-      const raw = await result.text();
+        target.pathname + target.search,
+        method === "POST" && body.trim() ? body : undefined,
+      );
+      const raw = result.body;
       let formatted = raw;
       try {
         formatted = pretty(raw ? JSON.parse(raw) : null);
@@ -287,18 +276,13 @@ export default function SovdExplorer() {
       setStatus(result.status);
       setResponse(formatted || "(empty response)");
       setElapsed(Math.round(performance.now() - started));
-      if (!result.ok) setError(`HTTP ${result.status} ${result.statusText}`);
+      if (result.status >= 400) setError(`HTTP ${result.status}`);
     } catch (cause) {
       setElapsed(Math.round(performance.now() - started));
       setError(
-        cause instanceof Error && cause.name === "AbortError"
-          ? "Request timed out after 10 seconds."
-          : cause instanceof Error
-            ? cause.message
-            : "Request failed",
+        cause instanceof Error ? cause.message : "Request failed",
       );
     } finally {
-      window.clearTimeout(timeout);
       setBusy(false);
     }
   }
@@ -388,57 +372,46 @@ export default function SovdExplorer() {
           </span>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-3">
-          <label className="text-xs text-slate-400">
-            CONNECTION NAME
-            <input
-              value={profileName}
-              onChange={(event) => setProfileName(event.target.value)}
-              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
-            />
-          </label>
-          <label className="text-xs text-slate-400 md:col-span-2">
-            SOVD SERVER BASE URL
-            <input
-              value={baseUrl}
-              onChange={(event) => setBaseUrl(event.target.value)}
-              placeholder="http://127.0.0.1:5173"
-              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100"
-            />
-          </label>
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={authEnabled}
-              onChange={(event) => setAuthEnabled(event.target.checked)}
-            />
-            Add bearer token
-          </label>
-          {authEnabled && (
-            <input
-              type="password"
-              autoComplete="off"
-              value={bearerToken}
-              onChange={(event) => setBearerToken(event.target.value)}
-              placeholder="Bearer token (kept in memory only)"
-              className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
-            />
-          )}
-          <button
-            onClick={saveProfile}
-            className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200"
-          >
-            Save profile
-          </button>
-        </div>
-        <p className="mt-3 text-xs leading-5 text-slate-500">
-          The Vite development proxy targets 127.0.0.1:18010. A different server origin
-          must permit browser CORS. The current Rust API does not enforce bearer authentication;
-          the token field only sends the header.
-        </p>
+        {inTauri() ? (
+          <p className="mt-4 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 text-xs leading-5 text-cyan-200">
+            Connected through VeloSOVD Studio: every request is sent by the desktop core with the
+            device certificate and your login. Requests are limited to central /api and /sovd paths.
+          </p>
+        ) : (
+          <>
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              <label className="text-xs text-slate-400">
+                CONNECTION NAME
+                <input
+                  value={profileName}
+                  onChange={(event) => setProfileName(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                />
+              </label>
+              <label className="text-xs text-slate-400 md:col-span-2">
+                SOVD SERVER BASE URL
+                <input
+                  value={baseUrl}
+                  onChange={(event) => setBaseUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:5173"
+                  className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100"
+                />
+              </label>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                onClick={saveProfile}
+                className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200"
+              >
+                Save profile
+              </button>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-slate-500">
+              Browser development mode: requests go through the Vite /api proxy without a login.
+              Use the VeloSOVD Studio desktop app for authenticated, audited access.
+            </p>
+          </>
+        )}
       </section>
 
       <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">

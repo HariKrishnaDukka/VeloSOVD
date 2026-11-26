@@ -51,3 +51,6 @@ scripts/*.backup-*
 
 # M1 auth-service runtime data (password hashes, login events)
 /auth/
+
+# M2 Tauri generated schemas (rebuilt by tauri-build)
+sovd-studio/src-tauri/gen/

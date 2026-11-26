@@ -620,7 +620,7 @@ Requirements and evidence: `requirements.csv` rows `PRJ-SEC-*` and `PRJ-SW-*`,
 | DEV-SW-01 | PRJ-SW-01 | Legacy `/api` execution call waits at most 8 s and then returns the current state | Long operations appear `running` on `/api` | Frontend migrates to `/sovd/v1` (ADR-0002) |
 | DEV-SW-02 | PRJ-SW-02 | `error_code` values are project-defined | Clients cannot rely on ISO 17978-3 error codes | Map to the ISO 17978-3 error model |
 | DEV-SW-03 | PRJ-SW-03 | Central requires all zones to use the same `zonal_http_port` | Mixed ports rejected at startup | Per-zone URL resolution |
-| DEV-FE-01 | — | Host proxy on 18010 is a TCP forwarder; the browser frontend presents no client certificate to the mTLS-only central server | Frontend cannot reach central in the mTLS deployment | Frontend gateway with its own client certificate and viewer role (R13) |
+| DEV-FE-01 | — | Host proxy on 18010 is a TCP forwarder; the browser frontend presents no client certificate to the mTLS-only central server | Frontend cannot reach central in the mTLS deployment | **Resolved for the desktop tool by M2** (Studio core holds the device certificate; see section 12). Browser dev mode remains without access. |
 
 These are recorded limitations of the demonstrator implementation. They are
 not claims about what ISO 17978, ISO/SAE 21434 or UNECE R155 require.
@@ -638,3 +638,17 @@ Requirements: `PRJ-SEC-11` … `PRJ-SEC-15`. How-to: `docs/USER_ACCOUNTS.md`.
 | DEV-AUTH-04 | PRJ-SEC-11 | CLI reads passwords from stdin with echo; dev signing key is a file, not in an HSM | Shoulder-surfing; key theft from disk | Hidden prompt; HSM/TPM-held signing key |
 | DEV-AUTH-05 | PRJ-SEC-13 | OAuth2 password grant (deprecated in OAuth 2.1); ISO 17978-3 `/authorize` flow not implemented | Not the standard's full auth model | Authorization-code + PKCE with an external IdP |
 | DEV-AUTH-06 | — | auth-service reuses the central server certificate in the dev setup | Shared server identity | Own certificate per service |
+
+
+## 12. VeloSOVD Studio desktop shell (M2): known limitations
+
+Requirements: `PRJ-STU-01` … `PRJ-STU-06`. Guide: `docs/STUDIO.md`.
+
+| ID | Requirement | Limitation | Risk | Planned resolution |
+|---|---|---|---|---|
+| DEV-STU-01 | — | Workspace layout is stored in web-view local storage per user name (layout only, no session data) | Layout visible to other OS users of the same account | Store under the OS user profile via Rust |
+| DEV-STU-02 | PRJ-STU-04 | Host-to-namespace tunnels (`studio_tunnels.sh`) use socat with sudo; development topology only | Not a deployment design | Real network routing on the target HPC / workshop network |
+| DEV-STU-03 | PRJ-STU-01 | Device private key is an unencrypted PEM file on disk | Key theft copies the device identity | OS keystore or TPM-bound key |
+| DEV-STU-04 | — | Browser dev mode (`npm run dev` without Tauri) has no login | None against mTLS-only central (requests fail); confusing for users | Keep for UI development only; clearly labelled |
+| DEV-STU-05 | PRJ-STU-01 | GUI flows (login screen, docking, status bar) have no automated end-to-end test; the core is unit-tested | UI regressions found late | tauri-driver / WebDriver tests (M4) |
+| DEV-STU-06 | PRJ-STU-04 | TLS pinned-name behaviour has no automated negative test | Regression in verifier wiring | Integration test with a mismatching certificate |
