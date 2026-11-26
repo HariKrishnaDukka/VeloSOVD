@@ -59,3 +59,8 @@ license feature; the shell only shows windows the user and license allow.
 ```bash
 cd sovd-studio && cargo tauri build       # .deb and AppImage in src-tauri/target/release/bundle/
 ```
+
+## Verify and audit
+
+    tools/verify_all.sh                  # fmt + clippy (root, src-tauri), tests, sovd-server gate (86 passed), traceability
+    python3 tools/check_dep_age.py       # 14-day rule over every npm lock entry and every src-tauri crate (needs network; first run ~7 min)
