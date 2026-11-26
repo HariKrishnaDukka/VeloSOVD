@@ -302,6 +302,19 @@ pub fn verify_files(paths: &[String]) -> Result<ChainSummary, String> {
     total.ok_or_else(|| "no audit files given".to_string())
 }
 
+/// Strict completeness check for offline verification. A chain that starts
+/// at a `segment-start` means older segments are missing (head truncation).
+pub fn check_complete(summary: &ChainSummary, allow_partial: bool) -> Result<(), String> {
+    if summary.anchored && !allow_partial {
+        return Err(format!(
+            "chain does not start at genesis: older segment(s) missing before seq {}; \
+             pass --allow-partial only if they were removed by retention policy",
+            summary.last_seq + 1 - summary.entries as u64
+        ));
+    }
+    Ok(())
+}
+
 /// First UDS byte of a raw request body `{"payload_hex": "..."}`.
 fn uds_sid(body: &[u8]) -> Option<String> {
     let value: Value = serde_json::from_slice(body).ok()?;
@@ -581,5 +594,31 @@ mod tests {
         let tail: Vec<&str> = text.lines().skip(1).collect();
         let err = verify_chain(&tail.join("\n")).unwrap_err();
         assert!(err.contains("genesis"));
+    }
+
+    #[test]
+    fn dropping_the_oldest_segment_fails_strict_check() {
+        let dir = rotation_dir("head");
+        let path = dir.join("audit.jsonl");
+        let log = AuditLog::open_with_limit(&path, 300).unwrap();
+        for i in 0..8 {
+            log.record(event(&format!("/req/{i}"))).unwrap();
+        }
+        drop(log);
+        let mut files = segments(&dir);
+
+        let full = verify_files(&files).unwrap();
+        assert!(check_complete(&full, false).is_ok());
+
+        files.remove(0); // head truncation: delete the oldest segment
+        let partial = verify_files(&files).unwrap();
+        assert!(partial.anchored);
+        assert!(
+            check_complete(&partial, false)
+                .unwrap_err()
+                .contains("genesis")
+        );
+        assert!(check_complete(&partial, true).is_ok());
+        let _ = fs::remove_dir_all(&dir);
     }
 }
