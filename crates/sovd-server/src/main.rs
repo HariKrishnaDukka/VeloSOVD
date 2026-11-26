@@ -1,3 +1,4 @@
+mod audit;
 mod authz;
 pub mod execution;
 mod limits;
@@ -1390,6 +1391,27 @@ fn build_zonal_mtls_client() -> Result<Client, Box<dyn std::error::Error + Send 
 
 #[tokio::main]
 async fn main() {
+    // Offline check: sovd-server --verify-audit <path>
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--verify-audit") {
+        let path = args
+            .get(2)
+            .map(String::as_str)
+            .unwrap_or("audit/central-audit.jsonl");
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("[AUDIT] cannot read {path}: {error}"));
+        match audit::verify_chain(&text) {
+            Ok(count) => {
+                println!("[AUDIT] OK: {count} entries, hash chain intact ({path})");
+                return;
+            }
+            Err(reason) => {
+                eprintln!("[AUDIT] FAILED: {reason} ({path})");
+                std::process::exit(2);
+            }
+        }
+    }
+
     let topology_path = std::env::var("SDV_TOPOLOGY")
         .unwrap_or_else(|_| "platform/config/vehicle-topology.toml".to_string());
 
@@ -1419,19 +1441,30 @@ async fn main() {
             panic!("[SOVD] Access policy load failed ({policy_path}): {error}")
         }),
     );
+    let audit_path =
+        std::env::var("SDV_AUDIT_LOG").unwrap_or_else(|_| "audit/central-audit.jsonl".to_string());
+    let audit_log = Arc::new(
+        audit::AuditLog::open(std::path::Path::new(&audit_path))
+            .unwrap_or_else(|error| panic!("[SOVD] Audit log open failed ({audit_path}): {error}")),
+    );
+    let audit_state = audit::AuditState {
+        log: audit_log,
+        policy: Arc::clone(&access_policy),
+    };
     let request_limits = Arc::new(limits::RequestLimits::new(
         limits::DEFAULT_MAX_CONCURRENT_REQUESTS,
         limits::DEFAULT_REQUEST_TIMEOUT,
     ));
 
     // Layer order: last added runs first.
-    // limits (503/504) -> authz (403) -> body limit (413) -> routes
+    // limits (503/504) -> audit (records all below) -> authz (403) -> body limit (413) -> routes
     let app = build_router(state.clone())
         .layer(DefaultBodyLimit::max(limits::DEFAULT_MAX_BODY_BYTES))
         .layer(middleware::from_fn_with_state(
             access_policy,
             authz::authorize,
         ))
+        .layer(middleware::from_fn_with_state(audit_state, audit::audit))
         .layer(middleware::from_fn_with_state(
             request_limits,
             limits::enforce,
@@ -1485,6 +1518,7 @@ async fn main() {
         EXECUTION_HISTORY_CAPACITY
     );
     println!("[SOVD] Access policy: {policy_path} (deny by default)");
+    println!("[SOVD] Audit log: {audit_path} (SHA-256 hash chain)");
     println!(
         "[SOVD] Limits: {} concurrent, {:?} timeout, {} byte body",
         limits::DEFAULT_MAX_CONCURRENT_REQUESTS,

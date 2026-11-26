@@ -45,3 +45,6 @@ scripts/*.backup-*
 **/.pytest_cache/
 *.bak
 /backups/
+
+# Runtime audit logs (R4)
+/audit/
