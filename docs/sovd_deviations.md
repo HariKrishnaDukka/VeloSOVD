@@ -371,6 +371,19 @@ Before production-oriented deployment:
 
 Security controls must be assessed across central services, zonal services, gateways and ECU diagnostic interfaces.
 
+### 5.1 Progress (2026-11-26)
+
+| Section 5 item | Status | Requirement |
+|---|---|---|
+| TLS enabled and correctly configured | Implemented earlier (TLS 1.3, mTLS both hops) | — |
+| Authentication and authorization enforced | Implemented (certificate roles) | PRJ-SEC-02, PRJ-SEC-03 |
+| Diagnostic requests access-controlled | Implemented | PRJ-SEC-01, PRJ-SEC-03 |
+| ECU and operation permissions | Partial: per role, not per ECU | DEV-SEC-03 |
+| Input validation and resource limits reviewed | Implemented | PRJ-SEC-04..06 |
+| Rate limiting and abuse protection | Partial: global concurrency only | DEV-SEC-04 |
+| Security-relevant actions auditable | Implemented | PRJ-SEC-07..10 |
+| Credential and key-management procedures | Open | — |
+
 ## 6. Conformance and traceability policy
 
 Each normative requirement should have:
@@ -586,3 +599,27 @@ physical ECU or every applicable diagnostic profile must respond identically.
 **Standards assessment:** Not established. The behaviour above is a
 project-defined simulator subset and must not be represented as full
 ISO 14229 or ISO 17978-3 conformance.
+
+
+## 10. Security hardening R1–R10: known limitations
+
+Requirements and evidence: `requirements.csv` rows `PRJ-SEC-*` and `PRJ-SW-*`,
+`docs/evidence/2026-11-26-security-hardening-r1-r10.md`.
+
+| ID | Requirement | Limitation | Risk | Planned resolution |
+|---|---|---|---|---|
+| DEV-SEC-01 | PRJ-SEC-01 | Raw UDS allow-list is compiled in and identical for every ECU and role | Cannot tighten per ECU without a rebuild | Move allow-list to configuration, per ECU and role |
+| DEV-SEC-02 | PRJ-SEC-02 | Identity is the certificate DNS SAN; no OAuth2/OIDC bearer tokens as modelled in ISO 17978-3 | Workshop and cloud clients need certificates | Decide token model (open decision, project-requirements §6) |
+| DEV-SEC-03 | PRJ-SEC-03 | Required role is derived from method and path string patterns; no per-ECU or per-operation permissions | A new route that does not match a pattern falls to the highest role (fail-safe, but coarse) | Explicit permission per route in the router |
+| DEV-SEC-04 | PRJ-SEC-04 | Concurrency limit is global; no per-client quota | One client can consume all permits | Per-principal token bucket |
+| DEV-SEC-05 | PRJ-SEC-05 | Deadline cancels the central handler only | Remote ECU operation may continue | Map to execution stop where the executor supports it |
+| DEV-SEC-07 | PRJ-SEC-07 | Audit write failure is logged and the request continues (fail-open) | Unaudited write actions possible when disk is full | Fail-closed for non-GET requests |
+| DEV-SEC-08 | PRJ-SEC-08, PRJ-SEC-09 | Hash chain proves integrity only; root on the HPC can regenerate the whole chain; segments are not signed | Undetected rewrite by a privileged attacker | Sign segments with an HSM-held key or stream to the vehicle SOC |
+| DEV-SEC-10 | PRJ-SEC-10 | No server-stop record after a crash or SIGKILL | Missing stop marker | Treat a start without preceding stop as an unclean-shutdown indicator in log review |
+| DEV-SW-01 | PRJ-SW-01 | Legacy `/api` execution call waits at most 8 s and then returns the current state | Long operations appear `running` on `/api` | Frontend migrates to `/sovd/v1` (ADR-0002) |
+| DEV-SW-02 | PRJ-SW-02 | `error_code` values are project-defined | Clients cannot rely on ISO 17978-3 error codes | Map to the ISO 17978-3 error model |
+| DEV-SW-03 | PRJ-SW-03 | Central requires all zones to use the same `zonal_http_port` | Mixed ports rejected at startup | Per-zone URL resolution |
+| DEV-FE-01 | — | Host proxy on 18010 is a TCP forwarder; the browser frontend presents no client certificate to the mTLS-only central server | Frontend cannot reach central in the mTLS deployment | Frontend gateway with its own client certificate and viewer role (R13) |
+
+These are recorded limitations of the demonstrator implementation. They are
+not claims about what ISO 17978, ISO/SAE 21434 or UNECE R155 require.

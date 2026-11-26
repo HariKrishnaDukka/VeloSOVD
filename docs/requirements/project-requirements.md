@@ -51,6 +51,41 @@ NFR-05: Resource-aware embedded deployment.
 
 NFR-06: Explicit error handling and logging.
 
+## 4a. Security and robustness requirements
+
+Added 2026-11-26 for the central SOVD server hardening (R1–R10). Register
+rows, verification and evidence: `requirements.csv` (`PRJ-SEC-*`, `PRJ-SW-*`).
+
+SEC-01: Raw UDS passthrough shall forward only allow-listed read-only services.
+
+SEC-02: Every request shall be mapped to a role from the mTLS client certificate; unmapped clients shall be refused.
+
+SEC-03: Write-type diagnostic actions shall require a role that permits them.
+
+SEC-04: Concurrent in-flight requests shall be limited.
+
+SEC-05: Request processing shall be bounded by a deadline.
+
+SEC-06: Request body size shall be limited.
+
+SEC-07: Every request, including denied requests, shall be audited without recording payloads or secrets.
+
+SEC-08: Audit records shall be tamper-evident.
+
+SEC-09: Audit log rotation shall preserve tamper evidence across files, and incomplete chains shall fail verification by default.
+
+SEC-10: Server start and stop shall be audited.
+
+SW-01: Both execution APIs shall share one execution store.
+
+SW-02: Every error response shall carry a machine-readable JSON error body.
+
+SW-03: Zonal service ports shall come from the vehicle topology configuration.
+
+SW-04: Startup shall fail before serving requests if the execution manager cannot be created.
+
+SW-05: The server shall shut down gracefully on SIGINT or SIGTERM.
+
 ## 5. Initial constraints
 
 - Linux is the first development platform.
@@ -61,7 +96,7 @@ NFR-06: Explicit error handling and logging.
 ## 6. Open decisions
 
 - SOVD API version and formal conformance scope.
-- Authentication and authorization model.
+- Authentication and authorization model (mTLS certificate roles implemented as interim model, SEC-02/SEC-03; OAuth2/OIDC per ISO 17978-3 not decided).
 - Target embedded hardware and production deployment architecture.
 - Physical CAN transceiver, wiring, termination and timing validation.
 - Production diagnostic transport profiles and interoperability testing.
