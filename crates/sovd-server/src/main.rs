@@ -1,18 +1,12 @@
 mod audit;
 mod authz;
+mod errors;
 pub mod execution;
 mod limits;
 mod tls_config;
 
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::VecDeque,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{sync::Arc, time::Duration};
 
 use crate::execution::{
     executor::{
@@ -31,7 +25,6 @@ use axum::{
 };
 use diagnostic_common::{DiagnosticFault, DiagnosticValue, EcuInfo, OperationResult};
 use reqwest::Client;
-use tokio::sync::Mutex;
 use tokio::sync::OnceCell;
 use vehicle_topology::{Ecu, VehicleTopology};
 
@@ -43,8 +36,6 @@ struct AppState {
     topology: VehicleTopology,
     zonal_http_port: u16,
     zonal_scheme: &'static str,
-    next_execution_id: Arc<AtomicU64>,
-    executions: Arc<Mutex<VecDeque<OperationExecution>>>,
     execution_manager: Arc<OnceCell<ExecutionManager>>,
 }
 
@@ -239,10 +230,6 @@ impl ClearFaultError {
         serde_json::to_string(&self.generic_error())
             .unwrap_or_else(|_| "operation-failed: Clear-fault operation failed".to_string())
     }
-
-    fn display_message(&self) -> String {
-        self.generic_error().message
-    }
 }
 
 impl From<ClearFaultError> for SovdApiError {
@@ -369,14 +356,6 @@ struct SovdExecutionError {
 #[derive(Debug, Deserialize)]
 struct SovdCapabilityRequest {
     capability: String,
-}
-
-fn unix_time_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(u64::MAX as u128) as u64
 }
 
 fn validate_payload_hex(input: &str) -> Result<String, StatusCode> {
@@ -858,67 +837,60 @@ async fn clear_faults(
     }))
 }
 
-async fn run_clear_faults(
-    state: &AppState,
-    id: String,
-    operation_id: &str,
-) -> Result<OperationExecution, StatusCode> {
-    if operation_id != "clear-faults" {
-        return Err(StatusCode::NOT_FOUND);
+/// Upper bound for the legacy synchronous `/api` execution call. Keeps the
+/// request below the R3 server deadline (10 s).
+const LEGACY_SYNC_WAIT: Duration = Duration::from_secs(8);
+
+/// Legacy `/api` view of a record held by the single ExecutionManager store.
+fn legacy_execution_view(record: crate::execution::model::ExecutionRecord) -> OperationExecution {
+    OperationExecution {
+        execution_id: record.execution_id,
+        ecu_id: record.ecu_id,
+        operation: record.operation_id,
+        status: execution_manager_status(record.state).to_string(),
+        success: record.state == ExecutionState::Completed,
+        // Failed executions store a GenericError as JSON; show its human text.
+        message: record
+            .message
+            .as_deref()
+            .map(|m| generic_error_from_execution_message(m).message)
+            .unwrap_or_default(),
+        created_at_unix_ms: record.created_at_unix_ms,
     }
+}
 
-    let url = resolve_ecu_url(state, &id)?;
-
-    // Do not hold the execution-history lock during network I/O. Once the
-    // operation is admitted, record both positive and negative outcomes.
-    let result = invoke_clear_faults(
-        &state.client,
-        format!("{url}/diagnostics/operations/clear-faults"),
-    )
-    .await;
-
-    let (success, message) = match result {
-        Ok(()) => (true, format!("{id} fault memory cleared")),
-        Err(error) => (false, error.display_message()),
-    };
-
-    let sequence = state.next_execution_id.fetch_add(1, Ordering::Relaxed);
-
-    // Use the validated API operation ID, not the backend's
-    // differently formatted "clear_faults" identifier.
-    let execution = OperationExecution {
-        execution_id: format!("exec-{sequence:016}"),
-        ecu_id: id,
-        operation: operation_id.to_string(),
-        status: if success {
-            "completed".to_string()
-        } else {
-            "failed".to_string()
-        },
-        success,
-        message,
-        created_at_unix_ms: unix_time_ms(),
-    };
-
-    {
-        let mut history = state.executions.lock().await;
-
-        if history.len() >= EXECUTION_HISTORY_CAPACITY {
-            history.pop_front();
+/// Wait until an execution reaches a terminal state (or the legacy deadline).
+async fn wait_for_terminal(
+    manager: &ExecutionManager,
+    execution_id: &str,
+) -> Result<crate::execution::model::ExecutionRecord, StatusCode> {
+    let deadline = tokio::time::Instant::now() + LEGACY_SYNC_WAIT;
+    loop {
+        let record = manager
+            .get_execution(execution_id)
+            .await
+            .map_err(manager_error_status)?;
+        if record.state.is_terminal() || tokio::time::Instant::now() >= deadline {
+            return Ok(record);
         }
-
-        history.push_back(execution.clone());
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
-
-    Ok(execution)
 }
 
 async fn execute_clear_faults(
     State(state): State<AppState>,
     Path((id, operation_id)): Path<(String, String)>,
 ) -> Result<Json<OperationExecution>, StatusCode> {
-    let execution = run_clear_faults(&state, id, &operation_id).await?;
-    Ok(Json(execution))
+    // R5: the legacy route is a synchronous wrapper over the same
+    // ExecutionManager used by /sovd/v1 - one store, one history.
+    let _ = resolve_ecu_url(&state, &id)?;
+    let manager = get_execution_manager(&state).await?;
+    let started = manager
+        .start_execution(id, &operation_id, None)
+        .await
+        .map_err(manager_error_status)?;
+    let record = wait_for_terminal(manager, &started.execution_id).await?;
+    Ok(Json(legacy_execution_view(record)))
 }
 
 /// Executor for the demonstrator's existing zonal clear-faults operation.
@@ -1098,14 +1070,13 @@ async fn list_operation_executions(
     Path((id, operation_id)): Path<(String, String)>,
 ) -> Result<Json<Vec<OperationExecution>>, StatusCode> {
     let _ = resolve_ecu_url(&state, &id)?;
-    let history = state.executions.lock().await;
-
-    let executions = history
-        .iter()
-        .filter(|execution| execution.ecu_id == id && execution.operation == operation_id)
-        .cloned()
+    let manager = get_execution_manager(&state).await?;
+    let executions = manager
+        .list_executions(&id, &operation_id)
+        .await
+        .into_iter()
+        .map(legacy_execution_view)
         .collect();
-
     Ok(Json(executions))
 }
 
@@ -1114,19 +1085,15 @@ async fn get_operation_execution(
     Path((id, operation_id, execution_id)): Path<(String, String, String)>,
 ) -> Result<Json<OperationExecution>, StatusCode> {
     let _ = resolve_ecu_url(&state, &id)?;
-    let history = state.executions.lock().await;
-
-    let execution = history
-        .iter()
-        .find(|execution| {
-            execution.ecu_id == id
-                && execution.operation == operation_id
-                && execution.execution_id == execution_id
-        })
-        .cloned()
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    Ok(Json(execution))
+    let manager = get_execution_manager(&state).await?;
+    let record = manager
+        .get_execution(&execution_id)
+        .await
+        .map_err(manager_error_status)?;
+    if record.ecu_id != id || record.operation_id != operation_id {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(Json(legacy_execution_view(record)))
 }
 
 async fn sovd_list_operation_executions(
@@ -1427,10 +1394,6 @@ async fn main() {
         topology,
         zonal_http_port: 9001,
         zonal_scheme: "https",
-        next_execution_id: Arc::new(AtomicU64::new(1)),
-        executions: Arc::new(Mutex::new(VecDeque::with_capacity(
-            EXECUTION_HISTORY_CAPACITY,
-        ))),
         execution_manager: Arc::new(OnceCell::new()),
     };
 
@@ -1457,7 +1420,7 @@ async fn main() {
     ));
 
     // Layer order: last added runs first.
-    // limits (503/504) -> audit (records all below) -> authz (403) -> body limit (413) -> routes
+    // json errors -> limits (503/504) -> audit (records all below) -> authz (403) -> body limit (413) -> routes
     let app = build_router(state.clone())
         .layer(DefaultBodyLimit::max(limits::DEFAULT_MAX_BODY_BYTES))
         .layer(middleware::from_fn_with_state(
@@ -1468,7 +1431,8 @@ async fn main() {
         .layer(middleware::from_fn_with_state(
             request_limits,
             limits::enforce,
-        ));
+        ))
+        .layer(middleware::from_fn(errors::json_errors));
 
     let bind_address = format!(
         "{}:{}",
@@ -1627,51 +1591,6 @@ mod payload_forwarding_integration_tests {
             .join("../../platform/config/vehicle-topology.toml");
         let topology = VehicleTopology::load(&topology_path).expect("Test topology must load");
 
-        let history = Arc::new(Mutex::new(VecDeque::new()));
-        {
-            let mut entries = history.lock().await;
-
-            entries.push_back(OperationExecution {
-                execution_id: "exec-clear-001".to_string(),
-                ecu_id: "ECM".to_string(),
-                operation: "clear-faults".to_string(),
-                status: "completed".to_string(),
-                success: true,
-                message: "Faults cleared".to_string(),
-                created_at_unix_ms: 1000,
-            });
-
-            entries.push_back(OperationExecution {
-                execution_id: "exec-read-001".to_string(),
-                ecu_id: "ECM".to_string(),
-                operation: "read-status".to_string(),
-                status: "completed".to_string(),
-                success: true,
-                message: "Status read".to_string(),
-                created_at_unix_ms: 2000,
-            });
-
-            entries.push_back(OperationExecution {
-                execution_id: "exec-clear-failed-001".to_string(),
-                ecu_id: "ECM".to_string(),
-                operation: "clear-faults".to_string(),
-                status: "failed".to_string(),
-                success: false,
-                message: "Fault memory clear failed".to_string(),
-                created_at_unix_ms: 2500,
-            });
-
-            entries.push_back(OperationExecution {
-                execution_id: "exec-bcm-001".to_string(),
-                ecu_id: "BCM".to_string(),
-                operation: "clear-faults".to_string(),
-                status: "completed".to_string(),
-                success: true,
-                message: "BCM faults cleared".to_string(),
-                created_at_unix_ms: 3000,
-            });
-        }
-
         let state = AppState {
             client: Client::builder()
                 .timeout(Duration::from_secs(3))
@@ -1680,10 +1599,35 @@ mod payload_forwarding_integration_tests {
             topology,
             zonal_http_port: 9001,
             zonal_scheme: "http",
-            next_execution_id: Arc::new(AtomicU64::new(1)),
-            executions: history,
             execution_manager: Arc::new(OnceCell::new()),
         };
+
+        // R5: seed the single ExecutionManager store (no legacy VecDeque).
+        let manager = get_execution_manager(&state)
+            .await
+            .expect("Execution manager must initialize");
+        let mut seeded = Vec::new();
+        for (ecu, fail) in [("ECM", false), ("ECM", true), ("BCM", false)] {
+            let record = manager
+                .create_execution(ecu.to_string(), "clear-faults", 1000)
+                .await
+                .expect("Seed execution must be created");
+            manager
+                .transition_execution(&record.execution_id, ExecutionState::Running, 1001)
+                .await
+                .expect("Seed execution must start");
+            let end = if fail {
+                ExecutionState::Failed
+            } else {
+                ExecutionState::Completed
+            };
+            manager
+                .transition_execution(&record.execution_id, end, 1002)
+                .await
+                .expect("Seed execution must finish");
+            seeded.push(record.execution_id);
+        }
+        let (first_id, failed_id) = (seeded[0].clone(), seeded[1].clone());
 
         let app = build_router(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1722,16 +1666,16 @@ mod payload_forwarding_integration_tests {
             .expect("Execution list must be a JSON array");
 
         assert_eq!(listed_items.len(), 2);
-        assert_eq!(listed_items[0]["execution_id"], "exec-clear-001");
+        assert_eq!(listed_items[0]["execution_id"], first_id.as_str());
         assert_eq!(listed_items[0]["operation"], "clear-faults");
         assert_eq!(listed_items[0]["ecu_id"], "ECM");
-        assert_eq!(listed_items[1]["execution_id"], "exec-clear-failed-001");
+        assert_eq!(listed_items[1]["execution_id"], failed_id.as_str());
         assert_eq!(listed_items[1]["success"], false);
 
         // The same execution must be retrievable under its owning operation.
         let response = client
             .get(format!(
-                "{base_url}/api/ecus/ECM/operations/clear-faults/executions/exec-clear-001"
+                "{base_url}/api/ecus/ECM/operations/clear-faults/executions/{first_id}"
             ))
             .send()
             .await
@@ -1743,13 +1687,13 @@ mod payload_forwarding_integration_tests {
             .await
             .expect("Execution detail response must be valid JSON");
 
-        assert_eq!(detail["execution_id"], "exec-clear-001");
+        assert_eq!(detail["execution_id"], first_id.as_str());
         assert_eq!(detail["operation"], "clear-faults");
 
         // A different operation ID must not expose the same execution.
         let response = client
             .get(format!(
-                "{base_url}/api/ecus/ECM/operations/read-status/executions/exec-clear-001"
+                "{base_url}/api/ecus/ECM/operations/read-status/executions/{first_id}"
             ))
             .send()
             .await
@@ -1775,10 +1719,6 @@ mod payload_forwarding_integration_tests {
             topology,
             zonal_http_port: 9001,
             zonal_scheme: "http",
-            next_execution_id: Arc::new(AtomicU64::new(1)),
-            executions: Arc::new(Mutex::new(VecDeque::with_capacity(
-                EXECUTION_HISTORY_CAPACITY,
-            ))),
             execution_manager: Arc::new(OnceCell::new()),
         };
 
@@ -1899,10 +1839,6 @@ mod payload_forwarding_integration_tests {
             topology,
             zonal_http_port: mock_port,
             zonal_scheme: "http",
-            next_execution_id: Arc::new(AtomicU64::new(1)),
-            executions: Arc::new(Mutex::new(VecDeque::with_capacity(
-                EXECUTION_HISTORY_CAPACITY,
-            ))),
             execution_manager: Arc::new(OnceCell::new()),
         };
 
@@ -2069,10 +2005,6 @@ mod payload_forwarding_integration_tests {
             topology,
             zonal_http_port: mock_port,
             zonal_scheme: "http",
-            next_execution_id: Arc::new(AtomicU64::new(1)),
-            executions: Arc::new(Mutex::new(VecDeque::with_capacity(
-                EXECUTION_HISTORY_CAPACITY,
-            ))),
             execution_manager: Arc::new(OnceCell::new()),
         };
 
@@ -2276,10 +2208,6 @@ mod payload_forwarding_integration_tests {
             topology,
             zonal_http_port: mock_port,
             zonal_scheme: "http",
-            next_execution_id: Arc::new(AtomicU64::new(1)),
-            executions: Arc::new(Mutex::new(VecDeque::with_capacity(
-                EXECUTION_HISTORY_CAPACITY,
-            ))),
             execution_manager: Arc::new(OnceCell::new()),
         };
 
@@ -2362,10 +2290,6 @@ mod payload_forwarding_integration_tests {
             topology,
             zonal_http_port: mock_port,
             zonal_scheme: "http",
-            next_execution_id: Arc::new(AtomicU64::new(1)),
-            executions: Arc::new(Mutex::new(VecDeque::with_capacity(
-                EXECUTION_HISTORY_CAPACITY,
-            ))),
             execution_manager: Arc::new(OnceCell::new()),
         };
 
@@ -2506,10 +2430,6 @@ mod payload_forwarding_integration_tests {
             topology,
             zonal_http_port: mock_port,
             zonal_scheme: "http",
-            next_execution_id: Arc::new(AtomicU64::new(1)),
-            executions: Arc::new(Mutex::new(VecDeque::with_capacity(
-                EXECUTION_HISTORY_CAPACITY,
-            ))),
             execution_manager: Arc::new(OnceCell::new()),
         };
 
@@ -2818,10 +2738,6 @@ mod clear_fault_history_tests {
             topology,
             zonal_http_port: mock_port,
             zonal_scheme: "http",
-            next_execution_id: Arc::new(AtomicU64::new(1)),
-            executions: Arc::new(Mutex::new(VecDeque::with_capacity(
-                EXECUTION_HISTORY_CAPACITY,
-            ))),
             execution_manager: Arc::new(OnceCell::new()),
         };
         let app = build_router(state);
@@ -2850,6 +2766,7 @@ mod clear_fault_history_tests {
         assert_eq!(execution["success"], false);
         assert_eq!(execution["status"], "failed");
         assert!(execution["message"].as_str().unwrap().contains("NRC 0x31"));
+        assert!(!execution["message"].as_str().unwrap().starts_with('{'));
 
         let history_response = client
             .get(format!(
