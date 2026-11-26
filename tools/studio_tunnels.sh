@@ -24,12 +24,15 @@ up() {
         if ss -ltn | grep -q "127.0.0.1:$port "; then
             echo "ERROR: 127.0.0.1:$port is used by another process"; exit 1
         fi
+        # The forwarder is run as "sh <file>", not executed directly: /run is
+        # mounted noexec on Ubuntu, so execvp() of a file there fails with
+        # "Permission denied" and every connection is closed at once.
         sudo tee "$RUN/$port.exec" >/dev/null <<EXEC
 #!/bin/sh
 exec ip netns exec $NS socat STDIO TCP:$host:$rport
 EXEC
-        sudo chmod 755 "$RUN/$port.exec"
-        sudo sh -c "nohup socat TCP-LISTEN:$port,bind=127.0.0.1,reuseaddr,fork EXEC:$RUN/$port.exec >$RUN/$port.log 2>&1 & echo \$! > $RUN/$port.pid"
+        sudo chmod 644 "$RUN/$port.exec"
+        sudo sh -c "nohup socat TCP-LISTEN:$port,bind=127.0.0.1,reuseaddr,fork EXEC:'sh $RUN/$port.exec' >$RUN/$port.log 2>&1 & echo \$! > $RUN/$port.pid"
         echo "tunnel 127.0.0.1:$port -> $NS $host:$rport"
     done
 }
