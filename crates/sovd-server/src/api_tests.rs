@@ -166,6 +166,80 @@ mod payload_forwarding_integration_tests {
         server_task.abort();
     }
 
+    /// SIL rule: central has no route that creates or injects faults.
+    #[tokio::test]
+    async fn faults_collection_rejects_post_and_put() {
+        let topology_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../platform/config/vehicle-topology.toml");
+        let topology = VehicleTopology::load(&topology_path).expect("Test topology must load");
+
+        let state = AppState {
+            client: Client::builder()
+                .timeout(Duration::from_secs(3))
+                .build()
+                .expect("HTTP client must initialize"),
+            topology,
+            zonal_http_port: 9001,
+            zonal_scheme: "http",
+            execution_manager: Arc::new(OnceCell::new()),
+        };
+
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Central test listener must bind");
+        let address = listener
+            .local_addr()
+            .expect("Central test address must be available");
+        let central_task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("Central test server failed");
+        });
+
+        let client = Client::new();
+
+        // The fault routes only know GET and DELETE: any write that could create a fault is 405.
+        for path in [
+            "/api/ecus/ECM/diagnostics/faults",
+            "/api/ecus/ECM/diagnostics/faults/P0101",
+        ] {
+            for method in [
+                reqwest::Method::POST,
+                reqwest::Method::PUT,
+                reqwest::Method::PATCH,
+            ] {
+                let response = client
+                    .request(method.clone(), format!("http://{address}{path}"))
+                    .send()
+                    .await
+                    .expect("Fault write request must complete");
+                assert_eq!(
+                    response.status(),
+                    StatusCode::METHOD_NOT_ALLOWED,
+                    "{method} {path}"
+                );
+            }
+        }
+
+        // No injection-style route exists under any obvious name.
+        for path in [
+            "/api/ecus/ECM/diagnostics/inject",
+            "/api/ecus/ECM/diagnostics/faults/inject",
+            "/api/ecus/ECM/faults",
+            "/api/faults",
+        ] {
+            let response = client
+                .post(format!("http://{address}{path}"))
+                .send()
+                .await
+                .expect("Injection probe must complete");
+            assert!(!response.status().is_success(), "POST {path}");
+        }
+
+        central_task.abort();
+    }
+
     #[tokio::test]
     async fn retrieves_individual_operation_description() {
         let topology_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
