@@ -29,6 +29,17 @@ export function onSessionLost(listener: Listener): () => void {
 
 export class SessionLostError extends Error {}
 
+/** Ends the session in the shell when a Rust command reports it expired; true if it did. */
+export function notifySessionLost(error: unknown): boolean {
+  const e = error as StudioError;
+  if (e?.kind === "session-expired" || e?.kind === "not-logged-in") {
+    const reason = e.message ?? "Please log in again.";
+    sessionListeners.forEach((l) => l(reason));
+    return true;
+  }
+  return false;
+}
+
 export function describe(error: unknown): string {
   if (error instanceof Error) return error.message;
   const e = error as StudioError;

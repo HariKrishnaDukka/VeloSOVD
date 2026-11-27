@@ -6,12 +6,13 @@ import { themeAbyss } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import App from "../App";
 import SovdExplorer from "../components/SovdExplorer";
+import FaultsWindow from "../components/FaultsWindow";
 import TracePanel from "./TracePanel";
 import SessionPanel from "./SessionPanel";
 import { allowedModules, type ModuleId } from "./modules";
 import type { SessionInfo } from "../services/studio";
 
-const LAYOUT_VERSION = "v1";
+const LAYOUT_VERSION = "v2"; // v2: Faults window added; saved v1 layouts are dropped once
 const layoutKey = (user: string) => `velosovd.layout.${LAYOUT_VERSION}.${user}`;
 
 function defaultLayout(api: DockviewApi, ids: ModuleId[]) {
@@ -20,6 +21,8 @@ function defaultLayout(api: DockviewApi, ids: ModuleId[]) {
   if (has("vehicle")) api.addPanel({ id: "vehicle", component: "vehicle", title: "Vehicle" });
   if (has("explorer"))
     api.addPanel({ id: "explorer", component: "explorer", title: "SOVD Explorer", position: { referencePanel: "vehicle", direction: "within" } });
+  if (has("faults"))
+    api.addPanel({ id: "faults", component: "faults", title: "Faults", position: { referencePanel: "vehicle", direction: "within" } });
   if (has("trace"))
     api.addPanel({ id: "trace", component: "trace", title: "Trace", position: { direction: "below" }, initialHeight: 220 });
   if (has("session"))
@@ -41,6 +44,7 @@ export default function Workspace({
   const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
     vehicle: () => <App />,
     explorer: () => <div className="h-full overflow-auto bg-[#080d18] p-4 text-slate-100"><SovdExplorer /></div>,
+    faults: (props) => <FaultsWindow {...props} />,
     trace: () => <TracePanel />,
     session: () => <SessionPanel session={session} />,
   };
