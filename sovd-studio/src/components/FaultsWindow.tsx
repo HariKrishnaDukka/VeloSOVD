@@ -242,7 +242,7 @@ export default function FaultsWindow({ api: panelApi }: IDockviewPanelProps) {
           </div>
         </section>
 
-        <aside className="flex w-[340px] shrink-0 flex-col gap-3.5 self-start rounded-xl border border-slate-800 bg-[#0b1220] p-[18px]">
+        <aside className="flex w-[380px] shrink-0 flex-col gap-3.5 self-start rounded-xl border border-slate-800 bg-[#0b1220] p-[18px]">
           {current ? (
             <>
               <div>
@@ -256,16 +256,6 @@ export default function FaultsWindow({ api: panelApi }: IDockviewPanelProps) {
                   {hex(current.status)} · {bin(current.status)}
                 </span>
               </div>
-              <div className="overflow-hidden rounded-lg border border-slate-800">
-                {(bits[current.status] ?? []).map((b) => (
-                  <div key={b.bit} className="flex items-center gap-2.5 border-b border-slate-800 px-2.5 py-[7px] text-xs last:border-b-0">
-                    <span className={`h-3 w-3 rounded-[3px] border-2 border-cyan-400 ${b.set ? "bg-cyan-400" : ""}`} />
-                    <span className="w-[38px] text-slate-400">bit {b.bit}</span>
-                    <span className="flex-1">{b.name}</span>
-                    <span className={`font-semibold ${b.set ? "text-slate-100" : "text-slate-400"}`}>{b.set ? "set" : "clear"}</span>
-                  </div>
-                ))}
-              </div>
               {mayChange && (
                 <button
                   disabled={busy}
@@ -275,6 +265,16 @@ export default function FaultsWindow({ api: panelApi }: IDockviewPanelProps) {
                   Clear this fault
                 </button>
               )}
+              <div className="overflow-hidden rounded-lg border border-slate-800">
+                {(bits[current.status] ?? []).map((b) => (
+                  <div key={b.bit} className="flex items-center gap-2.5 border-b border-slate-800 px-2.5 py-[7px] text-xs last:border-b-0">
+                    <span className={`h-3 w-3 shrink-0 rounded-[3px] border-2 border-cyan-400 ${b.set ? "bg-cyan-400" : ""}`} />
+                    <span className="w-[38px] shrink-0 whitespace-nowrap text-slate-400">bit {b.bit}</span>
+                    <span className="min-w-0 flex-1 break-words text-[11px]">{b.name}</span>
+                    <span className={`w-9 shrink-0 text-right font-semibold ${b.set ? "text-slate-100" : "text-slate-400"}`}>{b.set ? "set" : "clear"}</span>
+                  </div>
+                ))}
+              </div>
               <div className="text-xs text-slate-400">
                 {mayChange ? "Every clear" : "Reads"} {mayChange ? "is" : "are"} recorded in the audit log under your user name ({user || "—"}).
               </div>
