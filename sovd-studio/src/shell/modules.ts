@@ -3,7 +3,7 @@
 // Licensing (F16) then becomes configuration, not a rewrite.
 import { ROLE_RANK, type Feature, type SessionInfo } from "../services/studio";
 
-export type ModuleId = "vehicle" | "explorer" | "faults" | "trace" | "session";
+export type ModuleId = "vehicle" | "explorer" | "faults" | "operations" | "trace" | "session";
 
 export type ModuleManifest = {
   id: ModuleId;
@@ -18,6 +18,7 @@ export const MODULES: ModuleManifest[] = [
   { id: "vehicle", title: "Vehicle", minRole: "viewer", feature: "diagnostics" },
   { id: "explorer", title: "SOVD Explorer", minRole: "viewer", feature: "diagnostics" },
   { id: "faults", title: "Faults", minRole: "viewer", feature: "diagnostics" },
+  { id: "operations", title: "Operations", minRole: "viewer", feature: "diagnostics" },
   { id: "trace", title: "Trace", minRole: "viewer", feature: "diagnostics" },
   { id: "session", title: "Session & License", minRole: "viewer", feature: "diagnostics" },
 ];

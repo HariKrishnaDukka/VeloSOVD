@@ -7,9 +7,10 @@ import "dockview/dist/styles/dockview.css";
 import App from "../App";
 import SovdExplorer from "../components/SovdExplorer";
 import FaultsWindow from "../components/FaultsWindow";
+import OperationsWindow from "../components/OperationsWindow";
 import TracePanel from "./TracePanel";
 import SessionPanel from "./SessionPanel";
-import { allowedModules, type ModuleId } from "./modules";
+import { allowedModules, MODULES, type ModuleId } from "./modules";
 import type { SessionInfo } from "../services/studio";
 
 const LAYOUT_VERSION = "v2"; // v2: Faults window added; saved v1 layouts are dropped once
@@ -23,6 +24,8 @@ function defaultLayout(api: DockviewApi, ids: ModuleId[]) {
     api.addPanel({ id: "explorer", component: "explorer", title: "SOVD Explorer", position: { referencePanel: "vehicle", direction: "within" } });
   if (has("faults"))
     api.addPanel({ id: "faults", component: "faults", title: "Faults", position: { referencePanel: "vehicle", direction: "within" } });
+  if (has("operations"))
+    api.addPanel({ id: "operations", component: "operations", title: "Operations", position: { referencePanel: "vehicle", direction: "within" } });
   if (has("trace"))
     api.addPanel({ id: "trace", component: "trace", title: "Trace", position: { direction: "below" }, initialHeight: 220 });
   if (has("session"))
@@ -45,6 +48,7 @@ export default function Workspace({
     vehicle: () => <App />,
     explorer: () => <div className="h-full overflow-auto bg-[#080d18] p-4 text-slate-100"><SovdExplorer /></div>,
     faults: (props) => <FaultsWindow {...props} />,
+    operations: (props) => <OperationsWindow {...props} />,
     trace: () => <TracePanel />,
     session: () => <SessionPanel session={session} />,
   };
@@ -60,6 +64,18 @@ export default function Workspace({
           // Drop panels the user may no longer open (role changed).
           event.api.panels.filter((p) => !ids.includes(p.id as ModuleId)).forEach((p) => p.api.close());
           restored = event.api.panels.length > 0;
+          // Windows added in a later release go next to Vehicle; the saved layout stays.
+          if (restored)
+            ids
+              .filter((id) => !event.api.getPanel(id))
+              .forEach((id) =>
+                event.api.addPanel({
+                  id,
+                  component: id,
+                  title: MODULES.find((m) => m.id === id)?.title ?? id,
+                  position: event.api.getPanel("vehicle") ? { referencePanel: "vehicle", direction: "within" } : undefined,
+                }),
+              );
         } catch {
           restored = false;
         }
