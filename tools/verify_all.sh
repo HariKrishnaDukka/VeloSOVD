@@ -7,7 +7,7 @@
 # frontend once if sovd-studio/dist is missing) and the Tauri system libraries (docs/STUDIO.md).
 set -u
 export CARGO_TERM_COLOR=never
-export EXPECT_SOVD_SERVER=86
+export EXPECT_SOVD_SERVER=88
 cd "$(dirname "$0")/.." || exit 2
 LOG=$(mktemp -d); trap 'rm -rf "$LOG"' EXIT
 total=0; failed=0

@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use studio_core::{
-    ApiResponse, SessionInfo, Studio, StudioConfig, StudioError, license, trace::TraceEntry,
+    ApiResponse, SessionInfo, Studio, StudioConfig, StudioError, faults, license, operations,
+    polling, trace::TraceEntry,
 };
 use tauri::State;
 
@@ -106,6 +107,150 @@ fn license_status() -> license::LicenseStatus {
     license::status()
 }
 
+// ---- M3: faults, operations, polling ----
+// Every rule (roles, confirmation, paths, capabilities) lives in studio-core and is
+// unit-tested there; these commands only look up the session and call it.
+
+fn role_of(studio: &Studio) -> Result<String, StudioError> {
+    studio
+        .session_info()
+        .map(|s| s.role)
+        .ok_or(StudioError::NotLoggedIn)
+}
+
+/// Central answered something other than 2xx: tell the UI which status.
+fn require_ok(response: &ApiResponse) -> Result<(), StudioError> {
+    if (200..300).contains(&response.status) {
+        Ok(())
+    } else {
+        Err(StudioError::InvalidRequest(format!(
+            "central answered HTTP {}",
+            response.status
+        )))
+    }
+}
+
+/// The one polling interval for every repeated request to central.
+#[tauri::command]
+fn poll_interval_secs() -> u64 {
+    polling::POLL_INTERVAL_SECS
+}
+
+#[tauri::command]
+fn decode_dtc_status(status: u8) -> [faults::StatusBit; 8] {
+    faults::decode_status(status)
+}
+
+/// Whether the logged-in user may clear faults or start operations.
+#[tauri::command]
+fn can_change(state: State<'_, AppState>) -> bool {
+    state
+        .studio()
+        .ok()
+        .and_then(|s| s.session_info())
+        .is_some_and(|s| faults::may_change(&s.role))
+}
+
+#[tauri::command]
+async fn fault_list(
+    state: State<'_, AppState>,
+    ecu: String,
+    active: Option<bool>,
+) -> Result<ApiResponse, StudioError> {
+    let path = faults::fault_list_path(&ecu, active)?;
+    state.studio()?.api_request("GET", &path, None).await
+}
+
+/// `code = None` clears all faults of the ECU. `confirm` must repeat the ECU id.
+#[tauri::command]
+async fn clear_faults(
+    state: State<'_, AppState>,
+    ecu: String,
+    code: Option<String>,
+    confirm: Option<String>,
+) -> Result<ApiResponse, StudioError> {
+    let studio = state.studio()?;
+    let role = role_of(studio)?;
+    let plan = faults::plan_clear(&role, &ecu, code.as_deref(), confirm.as_deref())?;
+    studio.api_request(plan.method, &plan.path, None).await
+}
+
+#[tauri::command]
+async fn operation_list(
+    state: State<'_, AppState>,
+    ecu: String,
+) -> Result<Vec<operations::OperationInfo>, StudioError> {
+    let path = operations::descriptors_path(&ecu)?;
+    let response = state.studio()?.api_request("GET", &path, None).await?;
+    require_ok(&response)?;
+    operations::parse_operations(&response.body)
+}
+
+#[tauri::command]
+async fn operation_history(
+    state: State<'_, AppState>,
+    ecu: String,
+    operation: String,
+) -> Result<ApiResponse, StudioError> {
+    let path = operations::history_path(&ecu, &operation)?;
+    state.studio()?.api_request("GET", &path, None).await
+}
+
+/// Returns the new execution id.
+#[tauri::command]
+async fn operation_start(
+    state: State<'_, AppState>,
+    ecu: String,
+    operation: String,
+) -> Result<String, StudioError> {
+    let studio = state.studio()?;
+    let role = role_of(studio)?;
+    let plan = operations::plan_start(&role, &ecu, &operation)?;
+    let response = studio
+        .api_request(plan.method, &plan.path, plan.body)
+        .await?;
+    require_ok(&response)?;
+    operations::parse_start_id(&response.body)
+}
+
+#[tauri::command]
+async fn operation_status(
+    state: State<'_, AppState>,
+    ecu: String,
+    operation: String,
+    execution: String,
+) -> Result<operations::RunState, StudioError> {
+    let path = operations::execution_path(&ecu, &operation, &execution)?;
+    let response = state.studio()?.api_request("GET", &path, None).await?;
+    require_ok(&response)?;
+    operations::parse_run_state(&response.body)
+}
+
+/// Stop needs the role AND the operation's own `capabilities.stop`, read from central here
+/// (never supplied by the web view).
+#[tauri::command]
+async fn operation_stop(
+    state: State<'_, AppState>,
+    ecu: String,
+    operation: String,
+    execution: String,
+) -> Result<(), StudioError> {
+    let studio = state.studio()?;
+    let role = role_of(studio)?;
+    let list_path = operations::descriptors_path(&ecu)?;
+    let listed = studio.api_request("GET", &list_path, None).await?;
+    require_ok(&listed)?;
+    let capabilities = operations::parse_operations(&listed.body)?
+        .into_iter()
+        .find(|o| o.id == operation)
+        .and_then(|o| o.capabilities);
+    let plan = operations::plan_stop(&role, capabilities.as_ref(), &ecu, &operation, &execution)?;
+    let response = studio
+        .api_request(plan.method, &plan.path, plan.body)
+        .await?;
+    require_ok(&response)
+}
+
 /// `SDV_STUDIO_CONFIG`, else `platform/config/studio.toml` searched upwards
 /// from the working directory (works from the repo root and from src-tauri).
 fn find_config() -> Option<PathBuf> {
@@ -153,7 +298,17 @@ fn main() {
             api_request,
             trace_since,
             trace_clear,
-            license_status
+            license_status,
+            poll_interval_secs,
+            decode_dtc_status,
+            can_change,
+            fault_list,
+            clear_faults,
+            operation_list,
+            operation_history,
+            operation_start,
+            operation_status,
+            operation_stop
         ])
         .run(tauri::generate_context!())
         .expect("VeloSOVD Studio failed to start");
