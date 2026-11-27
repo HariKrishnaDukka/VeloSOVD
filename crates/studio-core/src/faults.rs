@@ -187,7 +187,10 @@ mod tests {
     fn clear_without_confirmation_is_refused() {
         for confirm in [None, Some(""), Some("ecm"), Some("BCM"), Some("ECM ")] {
             let all = plan_clear("engineer", "ECM", None, confirm);
-            assert!(matches!(all, Err(StudioError::InvalidRequest(_))), "{confirm:?}");
+            assert!(
+                matches!(all, Err(StudioError::InvalidRequest(_))),
+                "{confirm:?}"
+            );
             assert!(plan_clear("engineer", "ECM", Some("P0101"), confirm).is_err());
         }
         let all = plan_clear("technician", "ECM", None, Some("ECM")).unwrap();
@@ -222,7 +225,16 @@ mod tests {
         );
         let long = "A".repeat(65);
         for bad in [
-            "", "..", "a/b", "a?b", "a#b", "a b", "a\\b", "ECM/../x", "\u{e9}", "a\nb",
+            "",
+            "..",
+            "a/b",
+            "a?b",
+            "a#b",
+            "a b",
+            "a\\b",
+            "ECM/../x",
+            "\u{e9}",
+            "a\nb",
             long.as_str(),
         ] {
             assert!(fault_list_path(bad, None).is_err(), "{bad:?}");
