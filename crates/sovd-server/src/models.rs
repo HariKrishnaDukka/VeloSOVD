@@ -1,6 +1,7 @@
 //! HTTP request/response models of the central API (`/api` and `/sovd/v1`).
 
 use crate::api_error::*;
+use crate::execution::model::ExecutionCapabilities;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -49,6 +50,8 @@ pub(crate) struct OperationDescriptor {
     pub(crate) execution_path: String,
     pub(crate) description: String,
     pub(crate) supports_execution: bool,
+    /// What the operation's executor implements (execute, stop, freeze, reset, status).
+    pub(crate) capabilities: ExecutionCapabilities,
 }
 
 #[derive(Debug, Clone, Serialize)]

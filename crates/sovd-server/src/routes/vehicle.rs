@@ -211,6 +211,7 @@ pub(crate) async fn ecu_operations(
         execution_path: format!("/api/ecus/{id}/operations/clear-faults/executions"),
         description: "Clear all stored diagnostic faults for this ECU".to_string(),
         supports_execution: true,
+        capabilities: clear_faults_capabilities(),
     }]))
 }
 
@@ -228,6 +229,7 @@ pub(crate) async fn ecu_operation(
             execution_path: format!("/api/ecus/{id}/operations/clear-faults/executions"),
             description: "Clear all stored diagnostic faults for this ECU".to_string(),
             supports_execution: true,
+            capabilities: clear_faults_capabilities(),
         })),
         _ => Err(StatusCode::NOT_FOUND),
     }
