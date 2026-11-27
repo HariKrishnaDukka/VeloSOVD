@@ -170,7 +170,8 @@ struct StartBody {
 
 /// Parse the body of `GET .../executions/{exec}`.
 pub fn parse_run_state(body: &str) -> Result<RunState, StudioError> {
-    let unreadable = || StudioError::Transport("central sent an unreadable execution status".into());
+    let unreadable =
+        || StudioError::Transport("central sent an unreadable execution status".into());
     let parsed: StatusBody = serde_json::from_str(body).map_err(|_| unreadable())?;
     match parsed.status.as_str() {
         "running" => Ok(RunState::Running),
@@ -206,11 +207,23 @@ mod tests {
             history_path("ECM", "clear-faults").unwrap(),
             "/api/ecus/ECM/operations/clear-faults/executions"
         );
-        assert_eq!(descriptors_path("HVAC").unwrap(), "/api/ecus/HVAC/operations");
+        assert_eq!(
+            descriptors_path("HVAC").unwrap(),
+            "/api/ecus/HVAC/operations"
+        );
 
         let long = "A".repeat(65);
         for bad in [
-            "", "..", "a/b", "a?b", "a#b", "a b", "a\\b", "x/../y", "\u{e9}", "a\nb",
+            "",
+            "..",
+            "a/b",
+            "a?b",
+            "a#b",
+            "a b",
+            "a\\b",
+            "x/../y",
+            "\u{e9}",
+            "a\nb",
             long.as_str(),
         ] {
             assert!(descriptors_path(bad).is_err(), "{bad:?}");
@@ -288,9 +301,18 @@ mod tests {
     #[test]
     fn parses_sovd_status_and_start_response() {
         let status = |s: &str| format!(r#"{{"status":"{s}","capability":"execute"}}"#);
-        assert_eq!(parse_run_state(&status("running")).unwrap(), RunState::Running);
-        assert_eq!(parse_run_state(&status("completed")).unwrap(), RunState::Completed);
-        assert_eq!(parse_run_state(&status("failed")).unwrap(), RunState::Failed);
+        assert_eq!(
+            parse_run_state(&status("running")).unwrap(),
+            RunState::Running
+        );
+        assert_eq!(
+            parse_run_state(&status("completed")).unwrap(),
+            RunState::Completed
+        );
+        assert_eq!(
+            parse_run_state(&status("failed")).unwrap(),
+            RunState::Failed
+        );
         assert!(parse_run_state(&status("paused")).is_err());
         assert!(parse_run_state("not json").is_err());
         assert!(parse_run_state("{}").is_err());
