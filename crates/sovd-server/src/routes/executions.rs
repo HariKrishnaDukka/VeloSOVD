@@ -75,6 +75,19 @@ pub(crate) async fn execute_clear_faults(
     Ok(Json(legacy_execution_view(record)))
 }
 
+/// What the clear-faults operation can do. One definition: the executor, the operation
+/// registration and the published operation list all use it, so they cannot disagree.
+/// Stop is not offered: cancelling the HTTP future cannot prove the remote ECU stopped.
+pub(crate) fn clear_faults_capabilities() -> ExecutionCapabilities {
+    ExecutionCapabilities {
+        execute: true,
+        stop: false,
+        freeze: false,
+        reset: false,
+        status: true,
+    }
+}
+
 /// Executor for the demonstrator's existing zonal clear-faults operation.
 /// Stop/freeze/reset are intentionally not advertised: cancelling this HTTP
 /// future cannot prove that the remote ECU stopped processing the request.
@@ -87,13 +100,7 @@ pub(crate) struct ClearFaultsExecutor {
 
 impl OperationExecutor for ClearFaultsExecutor {
     fn capabilities(&self) -> ExecutionCapabilities {
-        ExecutionCapabilities {
-            execute: true,
-            stop: false,
-            freeze: false,
-            reset: false,
-            status: true,
-        }
+        clear_faults_capabilities()
     }
 
     fn execute<'a>(&'a self, context: ExecutionContext) -> ExecutionFuture<'a> {
@@ -138,13 +145,7 @@ pub(crate) async fn get_execution_manager(
             let manager = ExecutionManager::new_with_limits(EXECUTION_HISTORY_CAPACITY, 8)
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-            let capabilities = ExecutionCapabilities {
-                execute: true,
-                stop: false,
-                freeze: false,
-                reset: false,
-                status: true,
-            };
+            let capabilities = clear_faults_capabilities();
 
             manager
                 .register_operation(OperationDefinition {

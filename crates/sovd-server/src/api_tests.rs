@@ -240,6 +240,78 @@ mod payload_forwarding_integration_tests {
         central_task.abort();
     }
 
+    /// The operation list and the single description publish what the executor implements.
+    #[tokio::test]
+    async fn operation_list_publishes_capabilities() {
+        let topology_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../platform/config/vehicle-topology.toml");
+        let topology = VehicleTopology::load(&topology_path).expect("Test topology must load");
+
+        let state = AppState {
+            client: Client::builder()
+                .timeout(Duration::from_secs(3))
+                .build()
+                .expect("HTTP client must initialize"),
+            topology,
+            zonal_http_port: 9001,
+            zonal_scheme: "http",
+            execution_manager: Arc::new(OnceCell::new()),
+        };
+
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Central test listener must bind");
+        let address = listener
+            .local_addr()
+            .expect("Central test address must be available");
+        let central_task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("Central test server failed");
+        });
+
+        let client = Client::new();
+
+        let response = client
+            .get(format!("http://{address}/api/ecus/ECM/operations"))
+            .send()
+            .await
+            .expect("Operation list request must complete");
+        assert_eq!(response.status(), StatusCode::OK);
+        let list: Value = response
+            .json()
+            .await
+            .expect("Operation list must be valid JSON");
+        let operations = list.as_array().expect("Operation list must be an array");
+        assert_eq!(operations.len(), 1);
+        assert_eq!(operations[0]["id"], "clear-faults");
+
+        // clear-faults can be started and polled but not stopped, frozen or reset.
+        let capabilities = &operations[0]["capabilities"];
+        assert_eq!(capabilities["execute"], true);
+        assert_eq!(capabilities["status"], true);
+        assert_eq!(capabilities["stop"], false);
+        assert_eq!(capabilities["freeze"], false);
+        assert_eq!(capabilities["reset"], false);
+
+        let response = client
+            .get(format!(
+                "http://{address}/api/ecus/ECM/operation-descriptions/clear-faults"
+            ))
+            .send()
+            .await
+            .expect("Operation description request must complete");
+        assert_eq!(response.status(), StatusCode::OK);
+        let one: Value = response
+            .json()
+            .await
+            .expect("Operation description must be valid JSON");
+        assert_eq!(one["capabilities"], operations[0]["capabilities"]);
+
+        central_task.abort();
+    }
+
     #[tokio::test]
     async fn retrieves_individual_operation_description() {
         let topology_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
