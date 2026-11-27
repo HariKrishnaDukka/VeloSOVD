@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { api } from "./services/api";
 import { inTauri } from "./services/transport";
+import { studio } from "./services/studio";
 import type { Ecu, Fault, DiagnosticValue } from "./types";
 
 type Page = "overview" | "ecus" | "diagnostics" | "explorer";
@@ -26,6 +27,7 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [updated, setUpdated] = useState("");
+  const [pollMs, setPollMs] = useState(5000);
 
   const ecu = useMemo(() => ecus.find(x => x.id === selected), [ecus, selected]);
   const online = ecus.filter(x => x.status.toLowerCase() === "online").length;
@@ -60,18 +62,23 @@ export default function App() {
     }
   }, []);
 
+  // One polling interval for everything that calls central; the value lives in studio-core.
+  useEffect(() => {
+    void studio.pollIntervalMs().then(setPollMs).catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     void loadEcus();
-    const timer = window.setInterval(() => void loadEcus(), 5000);
+    const timer = window.setInterval(() => void loadEcus(), pollMs);
     return () => window.clearInterval(timer);
-  }, [loadEcus]);
+  }, [loadEcus, pollMs]);
 
   useEffect(() => {
     setHistory([]);
     void loadDetails(selected);
-    const timer = window.setInterval(() => void loadDetails(selected), 3000);
+    const timer = window.setInterval(() => void loadDetails(selected), pollMs);
     return () => window.clearInterval(timer);
-  }, [selected, loadDetails]);
+  }, [selected, loadDetails, pollMs]);
 
   async function clearFaults() {
     if (!ecu || !window.confirm(`Clear stored faults for ${ecu.id}?`)) return;
