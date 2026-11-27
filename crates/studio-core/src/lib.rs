@@ -9,9 +9,11 @@
 //! | `tls` | mTLS client with a pinned server identity (tunnels through localhost) |
 //! | `session` | login, token held in memory only, idle/expiry logout |
 //! | `trace` | ring buffer of every request for the Trace window (F7) |
+//! | `faults` | M3: DTC status decoding, role gate, clear confirmation, explorer paths |
 //! | `license` | feature gates - all enabled until the licensing milestone (F16) |
 
 pub mod config;
+pub mod faults;
 pub mod license;
 pub mod session;
 pub mod tls;
