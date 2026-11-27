@@ -10,11 +10,15 @@
 //! | `session` | login, token held in memory only, idle/expiry logout |
 //! | `trace` | ring buffer of every request for the Trace window (F7) |
 //! | `faults` | M3: DTC status decoding, role gate, clear confirmation, explorer paths |
+//! | `operations` | M3: start/stop rules, `/sovd/v1` execution paths, status parsing |
+//! | `polling` | M3: the one polling interval (5 s) for every repeated request to central |
 //! | `license` | feature gates - all enabled until the licensing milestone (F16) |
 
 pub mod config;
 pub mod faults;
 pub mod license;
+pub mod operations;
+pub mod polling;
 pub mod session;
 pub mod tls;
 pub mod trace;

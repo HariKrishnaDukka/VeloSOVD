@@ -438,6 +438,16 @@ role = "viewer"
                 "/sovd/v1/components/ECM/operations/clear-faults/executions/1",
                 Technician,
             ),
+            (
+                Method::DELETE,
+                "/sovd/v1/components/ECM/operations/clear-faults/executions/1",
+                Technician,
+            ),
+            (
+                Method::POST,
+                "/api/ecus/ECM/operations/clear-faults/executions",
+                Technician,
+            ),
             (Method::POST, "/api/ecus/ECM/diagnostics/requests", Engineer),
             (Method::PATCH, "/api/ecus/ECM", Engineer),
             (Method::POST, "/api/unknown", Engineer),

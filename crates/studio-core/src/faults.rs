@@ -69,7 +69,7 @@ pub fn may_change(role: &str) -> bool {
 }
 
 /// ECU ids and fault codes become URL path parts: letters, digits, `_` and `-` only.
-fn check_segment(kind: &str, value: &str) -> Result<(), StudioError> {
+pub(crate) fn check_segment(kind: &str, value: &str) -> Result<(), StudioError> {
     let ok = !value.is_empty()
         && value.len() <= 64
         && value
